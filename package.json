@@ -1,0 +1,17 @@
+{
+  "name": "xoso1995-server",
+  "version": "1.0.0",
+  "description": "Backend Xổ Số Miền Bắc 1p,3p,5p,30p - Hoàn chỉnh",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.0",
+    "mongoose": "^7.2.2"
+  }
+}
