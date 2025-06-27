@@ -13,7 +13,6 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { useAuth } from "@/app/components/AuthProvider"
 import { formatCurrency } from "@/lib/utils"
 import {
-  HomeIcon,
   LogOutIcon,
   MenuIcon,
   SettingsIcon,
@@ -27,6 +26,7 @@ import {
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
+import { TelevnLogo } from "./TelevnLogo" // Import the new logo component
 
 export default function AppHeader() {
   const { user, loading, signOut, refreshUser } = useAuth()
@@ -53,7 +53,7 @@ export default function AppHeader() {
     <header className="sticky top-0 z-40 w-full border-b bg-background">
       <div className="container flex h-16 items-center justify-between px-4 md:px-6">
         <Link href="/" className="flex items-center gap-2 font-semibold" prefetch={false}>
-          <HomeIcon className="h-6 w-6" />
+          <TelevnLogo /> {/* Use the new logo component here */}
           <span className="sr-only">Trang chủ</span>
         </Link>
         <nav className="hidden md:flex items-center gap-4">
@@ -148,7 +148,7 @@ export default function AppHeader() {
         </div>
         <Sheet>
           <SheetTrigger asChild>
-            <Button variant="outline" size="icon" className="md:hidden">
+            <Button variant="outline" size="icon" className="md:hidden bg-transparent">
               <MenuIcon className="h-6 w-6" />
               <span className="sr-only">Toggle navigation menu</span>
             </Button>
@@ -156,7 +156,7 @@ export default function AppHeader() {
           <SheetContent side="right">
             <div className="grid gap-6 p-6">
               <Link href="/" className="flex items-center gap-2 font-semibold" prefetch={false}>
-                <HomeIcon className="h-6 w-6" />
+                <TelevnLogo /> {/* Use the new logo component here */}
                 <span>Trang chủ</span>
               </Link>
               <Link
@@ -222,7 +222,7 @@ export default function AppHeader() {
                   >
                     Mua Proxy
                   </Link>
-                  <Button onClick={handleSignOut} variant="outline" className="w-full">
+                  <Button onClick={handleSignOut} variant="outline" className="w-full bg-transparent">
                     Đăng xuất
                   </Button>
                 </>

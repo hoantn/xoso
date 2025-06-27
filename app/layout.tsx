@@ -6,9 +6,9 @@ import { AuthProvider } from "./components/AuthProvider" // Assuming AuthProvide
 import { Toaster } from "@/components/ui/toaster"
 
 export const metadata: Metadata = {
-  title: "Proxy VPN Telegram Free 1 Click - Televn.Com",
-  description: "Quản lý proxy Telegram với giao diện đơn giản - Televn.Com",
-  generator: "televn.com",
+  title: "Proxy VPN Telegram 1 Click Manager",
+  description: "Quản lý proxy Telegram với giao diện đơn giản 1 click để cài đặt an toàn nhất",
+    generator: 'Televn.Com'
 }
 
 export default function RootLayout({

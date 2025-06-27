@@ -143,7 +143,7 @@ BEGIN
 
     EXCEPTION
         WHEN OTHERS THEN
-            -- Rollback nếu có lỗi và tr��� về thông báo lỗi
+            -- Rollback nếu có lỗi và trả về thông báo lỗi
             RAISE EXCEPTION 'Lỗi trong quá trình mua proxy: %', SQLERRM;
             RETURN QUERY SELECT FALSE, 'Lỗi hệ thống khi mua proxy', NULL, NULL;
     END;
