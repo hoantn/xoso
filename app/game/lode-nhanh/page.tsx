@@ -2,27 +2,37 @@
 
 import type React from "react"
 
-import { useState, useEffect, useCallback, useRef } from "react" // Import useRef
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { useAuth } from "@/app/components/AuthProvider"
 import { useToast } from "@/hooks/use-toast"
-import { Loader2, History, Clock, DollarSign, CheckCircle, AlertTriangle, Trophy, BookOpen } from "lucide-react"
+import {
+  Loader2,
+  History,
+  Clock,
+  DollarSign,
+  CheckCircle,
+  AlertTriangle,
+  Zap,
+  Target,
+  Timer,
+  Trophy,
+} from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 // Import game components and utilities
 import { BetTypeSelectorWithCategories } from "../components/BetTypeSelectorWithCategories"
 import { NumberInputSelector } from "../components/NumberInputSelector"
 import { DynamicBetAmountInput } from "../components/DynamicBetAmountInput"
-import { GameGuide } from "../components/GameGuide"
 import type { GameSession, GameResult, LotteryResultData } from "../types"
 import { getBetTypesByMode, BET_CATEGORIES, FAST_LOTTERY_MODES } from "../constants"
 import { formatCountdown, validateBetSelection, getCalculationBreakdown } from "../utils"
 import { getNumberLengthForBetType, getMaxNumbersForBetType, validateNumberFormat } from "../utils/validation"
 
-// Helper component to display full lottery results (all 8 prizes)
+// Helper component to display full lottery results
 interface FullLotteryResultsDisplayProps {
   resultsData: LotteryResultData
 }
@@ -31,14 +41,14 @@ const FullLotteryResultsDisplay: React.FC<FullLotteryResultsDisplayProps> = ({ r
   if (!resultsData) return null
 
   const prizes = [
-    { name: "ĐB", key: "special_prize", color: "bg-red-100 text-red-800" },
-    { name: "G1", key: "first_prize", color: "bg-blue-100 text-blue-800" },
-    { name: "G2", key: "second_prize", color: "bg-green-100 text-green-800" },
-    { name: "G3", key: "third_prize", color: "bg-purple-100 text-purple-800" },
-    { name: "G4", key: "fourth_prize", color: "bg-yellow-100 text-yellow-800" },
-    { name: "G5", key: "fifth_prize", color: "bg-pink-100 text-pink-800" },
-    { name: "G6", key: "sixth_prize", color: "bg-indigo-100 text-indigo-800" },
-    { name: "G7", key: "seventh_prize", color: "bg-gray-100 text-gray-800" },
+    { name: "ĐB", key: "special_prize", color: "bg-red-500 text-white" },
+    { name: "G1", key: "first_prize", color: "bg-blue-500 text-white" },
+    { name: "G2", key: "second_prize", color: "bg-green-500 text-white" },
+    { name: "G3", key: "third_prize", color: "bg-purple-500 text-white" },
+    { name: "G4", key: "fourth_prize", color: "bg-yellow-500 text-white" },
+    { name: "G5", key: "fifth_prize", color: "bg-pink-500 text-white" },
+    { name: "G6", key: "sixth_prize", color: "bg-indigo-500 text-white" },
+    { name: "G7", key: "seventh_prize", color: "bg-gray-500 text-white" },
   ]
 
   return (
@@ -49,13 +59,13 @@ const FullLotteryResultsDisplay: React.FC<FullLotteryResultsDisplayProps> = ({ r
         if (!prizeNumbers || prizeNumbers.length === 0 || prizeNumbers[0] === null) return null
 
         return (
-          <div key={prize.key} className="flex items-start gap-3">
-            <div className="w-8 text-sm font-bold text-gray-700">{prize.name}:</div>
+          <div key={prize.key} className="flex items-center gap-3">
+            <Badge className={`w-8 text-center ${prize.color} font-bold`}>{prize.name}</Badge>
             <div className="flex flex-wrap gap-2 flex-grow">
               {prizeNumbers.map((num: string, idx: number) => (
-                <span key={idx} className={`px-2 py-1 rounded text-sm font-semibold ${prize.color}`}>
+                <Badge key={idx} variant="outline" className="font-mono font-bold">
                   {num}
-                </span>
+                </Badge>
               ))}
             </div>
           </div>
@@ -70,7 +80,6 @@ export default function FastLotteryPage() {
   const { toast } = useToast()
 
   const [currentMode, setCurrentMode] = useState<"1p" | "5p" | "30p">("1p")
-  const [currentTab, setCurrentTab] = useState<string>("game") // New state for main tabs
   const [currentSession, setCurrentSession] = useState<GameSession | null>(null)
   const [recentResults, setRecentResults] = useState<GameResult[]>([])
   const [selectedBetType, setSelectedBetType] = useState<string>("")
@@ -80,7 +89,7 @@ export default function FastLotteryPage() {
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
-  const intervalRef = useRef<NodeJS.Timeout | null>(null) // Use useRef for interval ID
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const currentBetTypes = getBetTypesByMode(currentMode)
   const currentBetType = currentBetTypes.find((bt) => bt.id === selectedBetType) || currentBetTypes[0]
@@ -97,9 +106,6 @@ export default function FastLotteryPage() {
       }
       const data = await response.json()
 
-      console.log("Fetched data:", data)
-      console.log("Recent results:", data.recentResults)
-
       if (data.error) {
         throw new Error(data.error)
       }
@@ -107,7 +113,6 @@ export default function FastLotteryPage() {
       if (data.currentSession) {
         setCurrentSession(data.currentSession)
       } else {
-        // If no current session, set to null to indicate waiting for next session
         setCurrentSession(null)
       }
 
@@ -120,49 +125,43 @@ export default function FastLotteryPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [currentMode]) // currentMode is a dependency
+  }, [currentMode])
 
   useEffect(() => {
-    // Clear any existing interval before setting a new one
     if (intervalRef.current) {
       clearInterval(intervalRef.current)
     }
 
-    fetchGameData() // Initial fetch when component mounts or currentMode changes
+    fetchGameData()
 
     intervalRef.current = setInterval(() => {
       setCurrentSession((prev) => {
         if (prev) {
           const newCountdown = prev.countdown_seconds - 1
           if (newCountdown <= 0) {
-            // When countdown hits 0, clear the interval and fetch new data
             if (intervalRef.current) {
               clearInterval(intervalRef.current)
               intervalRef.current = null
             }
-            fetchGameData() // Trigger new fetch for the next session
-            return null // Clear current session to show loading state
+            fetchGameData()
+            return null
           }
           return { ...prev, countdown_seconds: newCountdown }
         }
-        // If prev is null (e.g., after a fetchGameData() call that hasn't returned yet),
-        // we might want to re-fetch if it stays null for too long, or just wait.
-        // For now, we'll let fetchGameData() handle the initial load.
         return prev
       })
     }, 1000)
 
-    // Cleanup function: clear interval when component unmounts or dependencies change
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
       }
     }
-  }, [fetchGameData]) // fetchGameData is the only dependency that should trigger re-run of effect
+  }, [fetchGameData])
 
   useEffect(() => {
     const betTypes = getBetTypesByMode(currentMode)
-    setSelectedBetType(betTypes[0].id) // Chọn bet type đầu tiên của mode
+    setSelectedBetType(betTypes[0].id)
   }, [currentMode])
 
   const handleNumbersChange = (numbers: string[]) => {
@@ -171,10 +170,10 @@ export default function FastLotteryPage() {
 
   const handleBetTypeChange = (betType: string) => {
     setSelectedBetType(betType)
-    setSelectedNumbers([]) // Clear numbers when bet type changes
-    setBetAmount("") // Clear bet amount when changing bet type
-    setSuccessMessage(null) // Clear success message
-    setError(null) // Clear error message
+    setSelectedNumbers([])
+    setBetAmount("")
+    setSuccessMessage(null)
+    setError(null)
   }
 
   const handlePlaceBet = async () => {
@@ -211,7 +210,6 @@ export default function FastLotteryPage() {
       return
     }
 
-    // Validate number selection based on bet type
     const betValidation = validateBetSelection(selectedBetType, selectedNumbers)
     if (!betValidation.isValid) {
       toast({
@@ -232,7 +230,6 @@ export default function FastLotteryPage() {
       return
     }
 
-    // Sử dụng logic tính toán chính xác
     const calculation = getCalculationBreakdown(currentBetType, amount, selectedNumbers.length)
     const totalCost = Number.parseInt(calculation.totalCostDisplay.replace(/[^\d]/g, ""))
     const totalWin = Number.parseInt(calculation.totalWinDisplay.replace(/[^\d]/g, ""))
@@ -277,11 +274,9 @@ export default function FastLotteryPage() {
       setSelectedNumbers([])
       refreshBalance()
 
-      const actualBetAmount = amount
-
       toast({
         title: "Đặt cược thành công!",
-        description: `${currentBetType.name}: ${selectedNumbers.join(", ")} - ${actualBetAmount.toLocaleString("vi-VN")}đ`,
+        description: `${currentBetType.name}: ${selectedNumbers.join(", ")} - ${amount.toLocaleString("vi-VN")}đ`,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Lỗi không xác định khi đặt cược.")
@@ -298,249 +293,225 @@ export default function FastLotteryPage() {
   const latestResult = recentResults.length > 0 ? recentResults[0] : null
 
   return (
-    <div className="container mx-auto py-8 px-4">
+    <div className="p-4 space-y-4">
       {/* Game Header */}
-      <Card className="mb-6 bg-gradient-to-r from-green-500 to-green-700 text-white">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-2xl">
-            <Trophy className="w-8 h-8" />
-            Lô Đề Nhanh - Tốc Độ Cao
-          </CardTitle>
-          <CardDescription className="text-green-100">
-            Lô đề siêu tốc với phiên quay 1-30 phút - Kết quả nhanh, thắng liền tay!
-          </CardDescription>
-        </CardHeader>
+      <Card className="bg-gradient-to-br from-orange-400 via-red-400 to-pink-500 border-0 text-white overflow-hidden relative">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-16 translate-x-16"></div>
+        <CardContent className="p-6 relative">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Zap className="w-6 h-6" />
+                <h1 className="text-2xl font-bold">Lô Đề Nhanh</h1>
+                <Badge className="bg-white/20 text-white animate-pulse">🔥 HOT</Badge>
+              </div>
+              <p className="text-orange-100">Siêu tốc 1-30 phút - Kết quả nhanh, thắng liền tay!</p>
+            </div>
+            <div className="text-5xl opacity-20">
+              <Timer />
+            </div>
+          </div>
+        </CardContent>
       </Card>
 
-      {/* Main Tabs */}
-      <Tabs value={currentTab} onValueChange={setCurrentTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 mb-6">
-          <TabsTrigger value="game" className="flex items-center gap-2">
-            <Trophy className="w-4 h-4" />
-            Chơi Game
-          </TabsTrigger>
-          <TabsTrigger value="guide" className="flex items-center gap-2">
-            <BookOpen className="w-4 h-4" />
-            Hướng Dẫn
-          </TabsTrigger>
+      {/* Mode Selection */}
+      <Tabs
+        value={currentMode}
+        onValueChange={(value) => setCurrentMode(value as "1p" | "5p" | "30p")}
+        className="w-full"
+      >
+        <TabsList className="grid w-full grid-cols-3 bg-white/80 backdrop-blur-sm">
+          {FAST_LOTTERY_MODES.map((mode) => (
+            <TabsTrigger
+              key={mode.id}
+              value={mode.id}
+              className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-400 data-[state=active]:to-red-500 data-[state=active]:text-white"
+            >
+              {mode.name}
+            </TabsTrigger>
+          ))}
         </TabsList>
 
-        {/* Game Tab Content */}
-        <TabsContent value="game">
-          <Tabs
-            value={currentMode}
-            onValueChange={(value) => setCurrentMode(value as "1p" | "5p" | "30p")}
-            className="w-full"
-          >
-            <TabsList className="grid w-full grid-cols-3">
-              {FAST_LOTTERY_MODES.map((mode) => (
-                <TabsTrigger key={mode.id} value={mode.id}>
-                  {mode.name}
-                </TabsTrigger>
-              ))}
-            </TabsList>
+        <TabsContent value={currentMode} className="mt-4 space-y-4">
+          {isLoading ? (
+            <Card className="bg-white/80 backdrop-blur-sm border-0">
+              <CardContent className="p-8 text-center">
+                <Loader2 className="w-8 h-8 animate-spin text-orange-500 mx-auto mb-4" />
+                <p className="text-gray-600">Đang tải phiên game...</p>
+              </CardContent>
+            </Card>
+          ) : error ? (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : (
+            <>
+              {/* Current Session & Latest Result */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Current Session */}
+                <Card className="bg-white/90 backdrop-blur-sm border-0 shadow-lg">
+                  <CardHeader className="text-center pb-3">
+                    <CardTitle className="flex items-center justify-center gap-2 text-gray-900">
+                      <Clock className="h-5 w-5 text-orange-500" />
+                      Phiên #{currentSession?.session_number || "---"}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-center">
+                    <div className="text-4xl font-bold text-red-600 mb-2">
+                      {currentSession ? formatCountdown(currentSession.countdown_seconds) : "00:00"}
+                    </div>
+                    <p className="text-sm text-gray-500 mb-4">Thời gian còn lại</p>
+                    <Badge
+                      className={`text-lg px-4 py-2 ${
+                        currentSession?.status === "open" ? "bg-green-500 text-white" : "bg-gray-500 text-white"
+                      }`}
+                    >
+                      {currentSession?.status === "open" ? "Đang mở cược" : "Đang quay số"}
+                    </Badge>
+                  </CardContent>
+                </Card>
 
-            <TabsContent value={currentMode} className="mt-4">
-              {isLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-                  <span className="ml-3 text-gray-600">Đang tải phiên game...</span>
-                </div>
-              ) : error ? (
-                <Alert variant="destructive">
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Left Column - Session Info & Results */}
-                  <div className="space-y-6">
-                    {/* Current Session */}
-                    <Card>
-                      <CardHeader className="text-center">
-                        <CardTitle className="flex items-center justify-center gap-2">
-                          <Clock className="h-5 w-5" />
-                          Phiên #{currentSession?.session_number || "---"}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="text-center">
-                        <div className="text-4xl font-bold text-red-600 mb-2">
-                          {currentSession ? formatCountdown(currentSession.countdown_seconds) : "00:00"}
-                        </div>
-                        <p className="text-sm text-gray-500 mb-4">Thời gian còn lại</p>
-                        <Badge
-                          variant={currentSession?.status === "open" ? "default" : "secondary"}
-                          className="text-lg px-4 py-2"
-                        >
-                          {currentSession?.status === "open" ? "Đang mở cược" : "Đang quay số"}
+                {/* Latest Result */}
+                <Card className="bg-white/90 backdrop-blur-sm border-0 shadow-lg">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-gray-900">
+                      <Trophy className="w-5 h-5 text-yellow-500" />
+                      Kết quả mới nhất
+                      {latestResult && (
+                        <Badge variant="outline" className="text-xs">
+                          #{latestResult.session_number}
                         </Badge>
-                      </CardContent>
-                    </Card>
+                      )}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {latestResult && latestResult.results_data ? (
+                      <FullLotteryResultsDisplay resultsData={latestResult.results_data} />
+                    ) : (
+                      <p className="text-gray-500 text-center py-4">Chưa có kết quả mới nhất</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
 
-                    {/* Latest Full Result */}
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <History className="w-5 h-5" />
-                          Kết quả phiên mới nhất
-                          {latestResult && (
-                            <span className="text-base text-gray-500 ml-2">
-                              #{latestResult.session_number} (
-                              {new Date(latestResult.draw_time).toLocaleTimeString("vi-VN")})
-                            </span>
-                          )}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {latestResult && latestResult.results_data ? (
-                          <FullLotteryResultsDisplay resultsData={latestResult.results_data} />
-                        ) : (
-                          <p className="text-gray-500 text-center">Chưa có kết quả mới nhất cho phiên này.</p>
-                        )}
-                      </CardContent>
-                    </Card>
+              {/* Betting Area */}
+              <Card className="bg-white/90 backdrop-blur-sm border-0 shadow-lg">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-gray-900">
+                    <Target className="w-5 h-5 text-blue-500" />
+                    Đặt cược
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Bet Type Selection */}
+                  <BetTypeSelectorWithCategories
+                    betTypes={currentBetTypes}
+                    categories={BET_CATEGORIES}
+                    selectedBetType={selectedBetType}
+                    onBetTypeChange={handleBetTypeChange}
+                    currentBetType={currentBetType}
+                  />
 
-                    {/* Other Recent Results (summarized) */}
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <History className="w-5 h-5" />
-                          Kết quả gần đây (tóm tắt)
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {recentResults.length === 0 ? (
-                          <p className="text-gray-500 text-center">Chưa có kết quả nào.</p>
-                        ) : (
-                          <div className="space-y-3">
-                            {recentResults.slice(1, 5).map(
-                              (
-                                result,
-                                index, // Show 4 more recent results
-                              ) => (
-                                <div
-                                  key={index}
-                                  className="flex items-center justify-between p-3 border rounded-md bg-gray-50"
-                                >
-                                  <div>
-                                    <p className="font-medium">#{result.session_number}</p>
-                                    <p className="text-xs text-gray-600">
-                                      {new Date(result.draw_time).toLocaleTimeString("vi-VN")}
-                                    </p>
-                                  </div>
-                                  <div className="flex gap-1">
-                                    {result.winning_numbers?.map((num, i) => (
-                                      <Badge key={i} className="bg-red-100 text-red-800 font-bold">
-                                        {num}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                </div>
-                              ),
-                            )}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  {/* Right Column - Betting Area */}
-                  <div className="lg:col-span-2 space-y-6">
-                    {/* Bet Type Selection */}
-                    <BetTypeSelectorWithCategories
-                      betTypes={currentBetTypes}
-                      categories={BET_CATEGORIES}
-                      selectedBetType={selectedBetType}
-                      onBetTypeChange={handleBetTypeChange}
-                      currentBetType={currentBetType}
+                  {/* Number Selection */}
+                  <div>
+                    <h4 className="font-semibold text-gray-900 mb-3">Chọn số</h4>
+                    <NumberInputSelector
+                      selectedNumbers={selectedNumbers}
+                      onNumbersChange={handleNumbersChange}
+                      maxNumbers={getMaxNumbersForBetType(selectedBetType)}
+                      numberLength={getNumberLengthForBetType(selectedBetType)}
+                      allowDuplicates={false}
+                      betType={selectedBetType}
                     />
-
-                    {/* Number Selection */}
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Chọn số</CardTitle>
-                        <CardDescription>
-                          {selectedBetType.includes("xien_4")
-                            ? "Chọn đúng 4 số khác nhau"
-                            : selectedBetType.includes("xien_3")
-                              ? "Chọn đúng 3 số khác nhau"
-                              : selectedBetType.includes("xien_2")
-                                ? "Chọn đúng 2 số khác nhau"
-                                : selectedBetType.includes("dau_duoi")
-                                  ? "Chọn từ 1-10 số khác nhau từ 0-9 để đoán số đầu (thứ 4) hoặc số đuôi (thứ 5)"
-                                  : "Nhập số bạn muốn cược (tối đa 10 số)"}
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <NumberInputSelector
-                          selectedNumbers={selectedNumbers}
-                          onNumbersChange={handleNumbersChange}
-                          maxNumbers={getMaxNumbersForBetType(selectedBetType)}
-                          numberLength={getNumberLengthForBetType(selectedBetType)}
-                          allowDuplicates={false}
-                          betType={selectedBetType}
-                        />
-                      </CardContent>
-                    </Card>
-
-                    {/* Betting Form */}
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Đặt cược</CardTitle>
-                        <CardDescription>
-                          Số dư:{" "}
-                          <strong className="text-green-600">
-                            {balance !== null ? `${balance.toLocaleString("vi-VN")} VNĐ` : "Đang tải..."}
-                          </strong>
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        <DynamicBetAmountInput
-                          currentBetType={currentBetType}
-                          selectedNumbers={selectedNumbers}
-                          betAmount={betAmount}
-                          onBetAmountChange={setBetAmount}
-                          balance={balance}
-                        />
-
-                        {successMessage && (
-                          <Alert className="bg-green-50 border-green-200">
-                            <CheckCircle className="h-4 w-4 text-green-600" />
-                            <AlertDescription className="text-green-800">{successMessage}</AlertDescription>
-                          </Alert>
-                        )}
-
-                        <Button
-                          onClick={handlePlaceBet}
-                          disabled={
-                            isLoading ||
-                            !user ||
-                            !currentSession ||
-                            currentSession.status !== "open" ||
-                            selectedNumbers.length === 0 ||
-                            Number.parseFloat(betAmount) < currentBetType.min_bet
-                          }
-                          className="w-full bg-red-600 hover:bg-red-700 text-lg py-6"
-                        >
-                          {isLoading ? (
-                            <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                          ) : (
-                            <DollarSign className="w-5 h-5 mr-2" />
-                          )}
-                          Đặt cược ngay
-                        </Button>
-                      </CardContent>
-                    </Card>
                   </div>
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
-        </TabsContent>
 
-        {/* Guide Tab Content */}
-        <TabsContent value="guide">
-          <GameGuide />
+                  {/* Bet Amount */}
+                  <div>
+                    <h4 className="font-semibold text-gray-900 mb-3">Số tiền cược</h4>
+                    <DynamicBetAmountInput
+                      currentBetType={currentBetType}
+                      selectedNumbers={selectedNumbers}
+                      betAmount={betAmount}
+                      onBetAmountChange={setBetAmount}
+                      balance={balance}
+                    />
+                  </div>
+
+                  {/* Success/Error Messages */}
+                  {successMessage && (
+                    <Alert className="bg-green-50 border-green-200">
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                      <AlertDescription className="text-green-800">{successMessage}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  {error && (
+                    <Alert variant="destructive">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertDescription>{error}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  {/* Place Bet Button */}
+                  <Button
+                    onClick={handlePlaceBet}
+                    disabled={
+                      isLoading ||
+                      !user ||
+                      !currentSession ||
+                      currentSession.status !== "open" ||
+                      selectedNumbers.length === 0 ||
+                      Number.parseFloat(betAmount) < currentBetType.min_bet
+                    }
+                    className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white text-lg py-6 shadow-lg"
+                  >
+                    {isLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                    ) : (
+                      <DollarSign className="w-5 h-5 mr-2" />
+                    )}
+                    Đặt cược ngay
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Recent Results */}
+              <Card className="bg-white/90 backdrop-blur-sm border-0 shadow-lg">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-gray-900">
+                    <History className="w-5 h-5 text-purple-500" />
+                    Kết quả gần đây
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {recentResults.length === 0 ? (
+                    <p className="text-gray-500 text-center py-4">Chưa có kết quả nào.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {recentResults.slice(1, 5).map((result, index) => (
+                        <div key={index} className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
+                          <div>
+                            <p className="font-medium text-gray-900">#{result.session_number}</p>
+                            <p className="text-xs text-gray-600">
+                              {new Date(result.draw_time).toLocaleTimeString("vi-VN")}
+                            </p>
+                          </div>
+                          <div className="flex gap-1">
+                            {result.winning_numbers?.map((num, i) => (
+                              <Badge key={i} className="bg-red-500 text-white font-bold">
+                                {num}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
         </TabsContent>
       </Tabs>
     </div>
