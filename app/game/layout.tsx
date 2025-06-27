@@ -4,7 +4,7 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { useAuth } from "@/app/components/AuthProvider"
-import { Loader2, Home, Gamepad2, Wallet, User, Trophy, DollarSign, RefreshCw } from "lucide-react"
+import { Loader2, Home, Gamepad2, Wallet, User, DollarSign, RefreshCw, History } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -40,9 +40,9 @@ export default function GameLayout({ children }: { children: React.ReactNode }) 
 
   const navigationItems = [
     { href: "/game", icon: Home, label: "Trang chủ", active: pathname === "/game" },
-    { href: "/game/lode-nhanh", icon: Gamepad2, label: "Lô Đề Nhanh", active: pathname.includes("/lode-nhanh") },
-    { href: "/game/lode-mien-bac", icon: Trophy, label: "Miền Bắc", active: pathname.includes("/lode-mien-bac") },
     { href: "/dashboard?tab=deposit", icon: Wallet, label: "Nạp tiền", active: false },
+    { href: "/game/lode-nhanh", icon: Gamepad2, label: "Lô Đề Nhanh", active: pathname.includes("/lode-nhanh") },
+    { href: "/game/lich-su-cuoc", icon: History, label: "Lịch sử cược", active: pathname.includes("/lich-su-cuoc") },
     { href: "/dashboard?tab=account", icon: User, label: "Tài khoản", active: false },
   ]
 
