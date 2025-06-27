@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/auto-process-lottery",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/auto-draw",
+      "schedule": "*/2 * * * *"
+    }
+  ]
+}

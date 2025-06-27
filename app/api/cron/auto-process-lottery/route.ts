@@ -45,9 +45,9 @@ function generateLotteryResults() {
 }
 
 // Helper function to process bet results and pay winners
-async function processBetResults(sessionId: string, winningNumbers: string[]) {
+async function processBetsForSession(sessionId: string, winningNumbers: string[], gameType: string) {
   try {
-    console.log(`[PROCESS_BETS] Processing bets for session ${sessionId}`)
+    console.log(`[BETS_PROCESS] Processing bets for session ${sessionId} (${gameType})`)
 
     // Get all pending bets for this session
     const { data: bets, error: betsError } = await supabase
@@ -57,116 +57,94 @@ async function processBetResults(sessionId: string, winningNumbers: string[]) {
       .eq("status", "pending")
 
     if (betsError) {
-      console.error("[PROCESS_BETS] Error fetching bets:", betsError)
-      return { processed: 0, error: betsError.message }
+      console.error("[BETS_PROCESS] Error fetching bets:", betsError)
+      return {
+        success: false,
+        processed: 0,
+        winners: 0,
+        totalWinAmount: 0,
+        error: betsError.message,
+      }
     }
 
     if (!bets || bets.length === 0) {
-      console.log("[PROCESS_BETS] No pending bets found")
-      return { processed: 0, error: null }
+      console.log(`[BETS_PROCESS] No pending bets found for session ${sessionId}`)
+      return {
+        success: true,
+        processed: 0,
+        winners: 0,
+        totalWinAmount: 0,
+        message: "No pending bets to process",
+      }
     }
 
-    console.log(`[PROCESS_BETS] Found ${bets.length} pending bets`)
+    console.log(`[BETS_PROCESS] Found ${bets.length} pending bets for session ${sessionId}`)
 
     let processedCount = 0
+    let totalWinners = 0
+    let totalWinAmount = 0
     const errors: string[] = []
 
     for (const bet of bets) {
       try {
-        // Check if bet won
-        const betNumbers = bet.numbers || []
-        const isWinner = betNumbers.some((num: string) => winningNumbers.includes(num))
-        const winAmount = isWinner ? bet.potential_win : 0
+        console.log(`[BETS_PROCESS] Processing bet ${bet.id} for user ${bet.user_id}`)
 
-        // Update bet status with processed flag
-        const { error: updateBetError } = await supabase
-          .from("user_bets")
-          .update({
-            status: isWinner ? "won" : "lost",
-            win_amount: winAmount,
-            processed_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", bet.id)
+        // Call the RPC function to process the bet and payout
+        const { data: rpcResult, error: rpcError } = await supabase.rpc("payout_winner_with_points", {
+          p_bet_id: bet.id,
+          p_session_id: sessionId,
+          p_winning_numbers: winningNumbers,
+        })
 
-        if (updateBetError) {
-          console.error(`[PROCESS_BETS] Error updating bet ${bet.id}:`, updateBetError)
-          errors.push(`Bet ${bet.id}: ${updateBetError.message}`)
+        if (rpcError) {
+          console.error(`[BETS_PROCESS] ERROR: Failed to process bet ${bet.id}: Payout RPC failed:`, rpcError)
+          errors.push(`Payout failed for bet ${bet.id}: ${rpcError.message}`)
           continue
         }
 
-        // If won, update user balance and create transaction
-        if (isWinner && winAmount > 0) {
-          // Get current user balance
-          const { data: userData, error: userError } = await supabase
-            .from("users")
-            .select("balance")
-            .eq("id", bet.user_id)
-            .single()
-
-          if (userError || !userData) {
-            console.error(`[PROCESS_BETS] Error fetching user ${bet.user_id}:`, userError)
-            errors.push(`User ${bet.user_id}: ${userError?.message || "User not found"}`)
-            continue
-          }
-
-          const currentBalance = Number(userData.balance) || 0
-          const newBalance = currentBalance + winAmount
-
-          // Update user balance
-          const { error: balanceError } = await supabase
-            .from("users")
-            .update({ balance: newBalance })
-            .eq("id", bet.user_id)
-
-          if (balanceError) {
-            console.error(`[PROCESS_BETS] Error updating balance for user ${bet.user_id}:`, balanceError)
-            errors.push(`Balance update ${bet.user_id}: ${balanceError.message}`)
-            continue
-          }
-
-          // Create win transaction
-          const { error: transactionError } = await supabase.from("transactions").insert({
-            user_id: bet.user_id,
-            type: "game_win",
-            amount: winAmount,
-            balance_before: currentBalance,
-            balance_after: newBalance,
-            description: `Thắng cược ${bet.bet_type} - Phiên ${bet.session_id}`,
-            status: "completed",
-            reference_id: bet.id,
-            metadata: {
-              bet_id: bet.id,
-              session_id: sessionId,
-              bet_type: bet.bet_type,
-              winning_numbers: winningNumbers,
-              bet_numbers: betNumbers,
-              processed_at: new Date().toISOString(),
-            },
-          })
-
-          if (transactionError) {
-            console.error(`[PROCESS_BETS] Error creating transaction for user ${bet.user_id}:`, transactionError)
-            errors.push(`Transaction ${bet.user_id}: ${transactionError.message}`)
-          }
+        // RPC function should return { is_winner, win_amount, new_balance }
+        if (rpcResult && rpcResult.is_winner) {
+          totalWinners++
+          totalWinAmount += rpcResult.win_amount || 0
+          console.log(`[BETS_PROCESS] ✅ Bet ${bet.id} won: ${rpcResult.win_amount}`)
+        } else {
+          console.log(`[BETS_PROCESS] ❌ Bet ${bet.id} lost`)
         }
-
         processedCount++
       } catch (error) {
-        console.error(`[PROCESS_BETS] Error processing bet ${bet.id}:`, error)
+        console.error(`[BETS_PROCESS] Error processing bet ${bet.id}:`, error)
         errors.push(`Bet ${bet.id}: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
 
-    console.log(`[PROCESS_BETS] Processed ${processedCount}/${bets.length} bets`)
+    console.log(
+      `[BETS_PROCESS] Completed processing for session ${sessionId}: ${processedCount}/${bets.length} bets, ${totalWinners} winners, total winnings: ${totalWinAmount}`,
+    )
+
     if (errors.length > 0) {
-      console.error(`[PROCESS_BETS] Errors encountered:`, errors)
+      console.error(`[BETS_PROCESS] Errors encountered:`, errors)
     }
 
-    return { processed: processedCount, errors: errors.length > 0 ? errors : null }
+    return {
+      success: errors.length === 0,
+      message:
+        errors.length > 0
+          ? `Processed with ${errors.length} errors`
+          : `Successfully processed ${processedCount} bets. ${totalWinners} winners, total winnings: ${totalWinAmount}`,
+      processed: processedCount,
+      winners: totalWinners,
+      totalWinAmount: totalWinAmount,
+      errors: errors.length > 0 ? errors : null,
+    }
   } catch (error) {
-    console.error("[PROCESS_BETS] General error:", error)
-    return { processed: 0, error: error instanceof Error ? error.message : String(error) }
+    console.error("[BETS_PROCESS] General error:", error)
+    return {
+      success: false,
+      processed: 0,
+      winners: 0,
+      totalWinAmount: 0,
+      error: error instanceof Error ? error.message : String(error),
+    }
   }
 }
 
@@ -182,54 +160,87 @@ export async function GET(request: Request) {
     const results = []
     const now = new Date()
 
-    // Get all active sessions
+    console.log(`[AUTO_PROCESS] Starting auto-process at ${now.toISOString()}`)
+
+    // Get all sessions that are not yet completed, ordered by end time
     const { data: activeSessions, error: sessionsError } = await supabase
       .from("game_sessions")
       .select("*")
       .in("game_type", ["lode_nhanh_1p", "lode_nhanh_5p", "lode_nhanh_30p"])
-      .eq("status", "open")
+      .neq("status", "completed")
+      .order("end_time", { ascending: true })
 
     if (sessionsError) {
-      console.error("Error fetching active sessions:", sessionsError)
+      console.error("[AUTO_PROCESS] Error fetching active sessions:", sessionsError)
       return NextResponse.json({ error: "Failed to fetch sessions" }, { status: 500 })
     }
 
     if (!activeSessions || activeSessions.length === 0) {
+      console.log("[AUTO_PROCESS] No active sessions to process")
       return NextResponse.json({
         success: true,
         message: "No active sessions to process",
         results: [],
+        timestamp: now.toISOString(),
       })
     }
+
+    console.log(`[AUTO_PROCESS] Found ${activeSessions.length} active sessions to process`)
 
     for (const session of activeSessions) {
       const endTime = new Date(session.end_time)
       const secondsRemaining = Math.floor((endTime.getTime() - now.getTime()) / 1000)
+      const gameTypeName =
+        session.game_type === "lode_nhanh_1p" ? "1p" : session.game_type === "lode_nhanh_5p" ? "5p" : "30p"
+
+      console.log(
+        `[AUTO_PROCESS] Processing session ${session.session_number} (${session.game_type}): ${session.status}, ${secondsRemaining}s remaining`,
+      )
 
       try {
-        // 10 seconds remaining: Close betting
-        if (secondsRemaining <= 10 && secondsRemaining > 8) {
+        // State 1: Open -> Close betting (15 seconds before end for 1p, 30 seconds for others)
+        const closeBettingThreshold = session.game_type === "lode_nhanh_1p" ? 15 : 30
+        if (session.status === "open" && secondsRemaining <= closeBettingThreshold && secondsRemaining > 10) {
+          console.log(`[AUTO_PROCESS] Closing betting for session ${session.session_number} (${session.game_type})`)
+
           const { error: updateError } = await supabase
             .from("game_sessions")
             .update({
+              status: "drawing",
               results_data: {
                 ...session.results_data,
                 status: "betting_closed",
                 description: "Đã đóng cược - Chuẩn bị quay số",
+                betting_closed_at: now.toISOString(),
               },
             })
             .eq("id", session.id)
 
           if (!updateError) {
-            results.push(`Session ${session.session_number}: Closed betting`)
+            results.push(`🔒 Session ${session.session_number} (${gameTypeName}): Closed betting`)
+          } else {
+            console.error(`[AUTO_PROCESS] Failed to close betting for session ${session.session_number}:`, updateError)
+            results.push(
+              `❌ Session ${session.session_number} (${gameTypeName}): Failed to close betting: ${updateError.message}`,
+            )
           }
         }
-        // 8 seconds remaining: Generate results
-        else if (secondsRemaining <= 8 && secondsRemaining > 3) {
-          // Check if results already generated
-          if (!session.winning_numbers || session.winning_numbers.length === 0) {
+        // State 2: Drawing -> Generate results and process bets (10 seconds before end)
+        else if (session.status === "drawing" && secondsRemaining <= 10 && secondsRemaining > 0) {
+          console.log(
+            `[AUTO_PROCESS] Generating results and processing bets for session ${session.session_number} (${session.game_type})`,
+          )
+
+          // Generate results if not already generated
+          let winningNumbers = session.winning_numbers || []
+
+          if (winningNumbers.length === 0) {
             const lotteryResults = generateLotteryResults()
-            const winningNumbers = [lotteryResults.special_prize.slice(-2)]
+            winningNumbers = [lotteryResults.special_prize.slice(-2)]
+
+            console.log(
+              `[AUTO_PROCESS] Generated winning numbers for session ${session.session_number}: ${winningNumbers.join(", ")}`,
+            )
 
             const { error: updateError } = await supabase
               .from("game_sessions")
@@ -239,42 +250,64 @@ export async function GET(request: Request) {
                   ...session.results_data,
                   status: "drawing",
                   description: "Đang quay số",
+                  drawing_started_at: now.toISOString(),
                   ...lotteryResults,
                 },
               })
               .eq("id", session.id)
 
             if (!updateError) {
-              results.push(`Session ${session.session_number}: Generated results`)
+              results.push(
+                `🎲 Session ${session.session_number} (${gameTypeName}): Generated results - Winning numbers: ${winningNumbers.join(", ")}`,
+              )
+            } else {
+              console.error(
+                `[AUTO_PROCESS] Failed to generate results for session ${session.session_number}:`,
+                updateError,
+              )
+              results.push(
+                `❌ Session ${session.session_number} (${gameTypeName}): Failed to generate results: ${updateError.message}`,
+              )
+              continue
             }
           }
-        }
-        // 3 seconds remaining: Process bets and pay winners
-        else if (secondsRemaining <= 3 && secondsRemaining > 0) {
-          // Check if already processed
-          if (session.results_data?.status !== "completed") {
-            const winningNumbers = session.winning_numbers || []
-            const betResults = await processBetResults(session.id, winningNumbers)
 
-            const { error: updateError } = await supabase
-              .from("game_sessions")
-              .update({
-                results_data: {
-                  ...session.results_data,
-                  status: "processing_rewards",
-                  description: "Đang xử lý thưởng",
-                  bet_processing: betResults,
-                },
-              })
-              .eq("id", session.id)
+          // Process bets immediately after generating results
+          console.log(`[AUTO_PROCESS] Processing bets for session ${session.session_number}`)
+          const betResults = await processBetsForSession(session.id, winningNumbers, session.game_type)
 
-            if (!updateError) {
-              results.push(`Session ${session.session_number}: Processed ${betResults.processed} bets`)
-            }
+          const { error: updateError2 } = await supabase
+            .from("game_sessions")
+            .update({
+              status: "processing_rewards",
+              results_data: {
+                ...session.results_data,
+                status: "processing_rewards",
+                description: "Đang xử lý thưởng",
+                bet_processing_started_at: now.toISOString(),
+                bet_processing: betResults,
+              },
+            })
+            .eq("id", session.id)
+
+          if (!updateError2) {
+            results.push(
+              `💰 Session ${session.session_number} (${gameTypeName}): Processed ${betResults.processed} bets, ${betResults.winners} winners, winnings: ${betResults.totalWinAmount}`,
+            )
+          } else {
+            console.error(
+              `[AUTO_PROCESS] Failed to update after bet processing for session ${session.session_number}:`,
+              updateError2,
+            )
+            results.push(
+              `❌ Session ${session.session_number} (${gameTypeName}): Failed to update after bet processing: ${updateError2.message}`,
+            )
           }
         }
-        // Time expired: Complete session
-        else if (secondsRemaining <= 0) {
+        // State 3: Processing rewards -> Completed (at or after end time)
+        else if (session.status === "processing_rewards" && secondsRemaining <= 0) {
+          console.log(`[AUTO_PROCESS] Completing session ${session.session_number} (${session.game_type})`)
+
           const { error: updateError } = await supabase
             .from("game_sessions")
             .update({
@@ -289,28 +322,93 @@ export async function GET(request: Request) {
             .eq("id", session.id)
 
           if (!updateError) {
-            results.push(`Session ${session.session_number}: Completed`)
+            results.push(`✅ Session ${session.session_number} (${gameTypeName}): Completed`)
+          } else {
+            console.error(`[AUTO_PROCESS] Failed to complete session ${session.session_number}:`, updateError)
+            results.push(
+              `❌ Session ${session.session_number} (${gameTypeName}): Failed to complete: ${updateError.message}`,
+            )
           }
         }
+        // Handle sessions that are overdue but still in open status
+        else if (session.status === "open" && secondsRemaining <= 0) {
+          console.log(
+            `[AUTO_PROCESS] Emergency processing for overdue session ${session.session_number} (${session.game_type})`,
+          )
+
+          // Force close and process immediately
+          const lotteryResults = generateLotteryResults()
+          const winningNumbers = [lotteryResults.special_prize.slice(-2)]
+
+          const { error: updateError } = await supabase
+            .from("game_sessions")
+            .update({
+              status: "processing_rewards",
+              winning_numbers: winningNumbers,
+              results_data: {
+                ...session.results_data,
+                status: "processing_rewards",
+                description: "Xử lý khẩn cấp - Phiên quá hạn",
+                emergency_processed_at: now.toISOString(),
+                ...lotteryResults,
+              },
+            })
+            .eq("id", session.id)
+
+          if (!updateError) {
+            // Process bets immediately
+            const betResults = await processBetsForSession(session.id, winningNumbers, session.game_type)
+            results.push(
+              `⚡ Session ${session.session_number} (${gameTypeName}): Emergency processed - ${betResults.processed} bets, ${betResults.winners} winners`,
+            )
+          } else {
+            console.error(
+              `[AUTO_PROCESS] Failed emergency processing for session ${session.session_number}:`,
+              updateError,
+            )
+            results.push(
+              `❌ Session ${session.session_number} (${gameTypeName}): Failed emergency processing: ${updateError.message}`,
+            )
+          }
+        } else {
+          // Session is in normal state, no action needed
+          const statusEmoji = session.status === "open" ? "🟢" : session.status === "drawing" ? "🎲" : "⏳"
+          results.push(
+            `${statusEmoji} Session ${session.session_number} (${gameTypeName}): ${session.status} (${secondsRemaining}s remaining)`,
+          )
+        }
       } catch (error) {
-        console.error(`Error processing session ${session.session_number}:`, error)
-        results.push(`Session ${session.session_number}: Error - ${error.message}`)
+        console.error(
+          `[AUTO_PROCESS] Error processing session ${session.session_number} (${session.game_type}):`,
+          error,
+        )
+        results.push(
+          `❌ Session ${session.session_number} (${gameTypeName}): Processing error - ${error instanceof Error ? error.message : String(error)}`,
+        )
       }
     }
 
+    console.log(`[AUTO_PROCESS] Completed auto-process`)
+
     return NextResponse.json({
       success: true,
-      message: "Auto-process completed",
+      message: "Auto-process lottery completed",
       results: results,
       timestamp: now.toISOString(),
+      processed_sessions: activeSessions.length,
     })
   } catch (error) {
-    console.error("Auto-process error:", error)
-    return NextResponse.json({ error: "Internal server error", details: error.message }, { status: 500 })
+    console.error("[AUTO_PROCESS] General error:", error)
+    return NextResponse.json(
+      {
+        error: "Internal server error",
+        details: error instanceof Error ? error.message : String(error),
+      },
+      { status: 500 },
+    )
   }
 }
 
 export async function POST(request: Request) {
-  // Allow POST method as well for manual triggers
   return GET(request)
 }
