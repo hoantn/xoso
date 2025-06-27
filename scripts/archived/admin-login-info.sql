@@ -1,0 +1,4 @@
+-- Thông tin đăng nhập admin test
+-- Email: admin@test.com
+-- Password: admin123456
+-- UUID: 00000000-0000-0000-0000-000000000001
