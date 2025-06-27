@@ -176,6 +176,10 @@ export default function FastLotteryPage() {
     setError(null)
   }
 
+  const handleBetAmountChange = (amount: string) => {
+    setBetAmount(amount)
+  }
+
   const handlePlaceBet = async () => {
     if (!user) {
       toast({
@@ -248,19 +252,30 @@ export default function FastLotteryPage() {
     setSuccessMessage(null)
 
     try {
+      // Determine if this is a point-based bet (Lô)
+      const isPointBased = selectedBetType.includes("lo") && !selectedBetType.includes("de")
+
+      const potentialWin = totalWin // totalWin đã tính ở trên
+
+      const payload: any = {
+        sessionId: currentSession.id,
+        betType: selectedBetType,
+        numbers: selectedNumbers,
+        amount: totalCost,
+        potentialWin, // 🆕
+      }
+
+      if (isPointBased) {
+        payload.points = amount // For Lô, amount is points per number
+      }
+
       const response = await fetch("/api/game/place-bet", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
         },
-        body: JSON.stringify({
-          session_id: currentSession.id,
-          bet_type: selectedBetType,
-          numbers: selectedNumbers,
-          amount: amount,
-          potential_win: totalWin,
-        }),
+        body: JSON.stringify(payload),
       })
 
       if (!response.ok) {
@@ -269,14 +284,14 @@ export default function FastLotteryPage() {
       }
 
       const result = await response.json()
-      setSuccessMessage(`Đặt cược thành công! Tiền thắng tối đa: ${result.potential_win.toLocaleString("vi-VN")}đ`)
+      setSuccessMessage(`Đặt cược thành công! Chi phí: ${totalCost.toLocaleString("vi-VN")}đ`)
       setBetAmount("")
       setSelectedNumbers([])
       refreshBalance()
 
       toast({
         title: "Đặt cược thành công!",
-        description: `${currentBetType.name}: ${selectedNumbers.join(", ")} - ${amount.toLocaleString("vi-VN")}đ`,
+        description: `${currentBetType.name}: ${selectedNumbers.join(", ")} - ${totalCost.toLocaleString("vi-VN")}đ`,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Lỗi không xác định khi đặt cược.")
@@ -433,7 +448,7 @@ export default function FastLotteryPage() {
                       currentBetType={currentBetType}
                       selectedNumbers={selectedNumbers}
                       betAmount={betAmount}
-                      onBetAmountChange={setBetAmount}
+                      onBetAmountChange={handleBetAmountChange}
                       balance={balance}
                     />
                   </div>

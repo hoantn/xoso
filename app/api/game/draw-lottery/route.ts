@@ -2,7 +2,6 @@ import { NextResponse, type NextRequest } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { AuthService } from "@/lib/auth"
 
-// IMPORTANT: Use the service role key to bypass RLS for admin tasks.
 const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 // --- HELPER FUNCTIONS ---
@@ -48,18 +47,17 @@ function getAllTwoDigitEndings(results: any): string[] {
   return endings
 }
 
-// FIXED: Function to calculate the number of hits for a bet
-function getBetWinCount(bet: any, results: any, allTwoDigitEndings: string[]): number {
+// CORRECTED: Function to calculate win count for each individual number
+function calculateIndividualWinCounts(bet: any, results: any, allTwoDigitEndings: string[]): Record<string, number> {
   const { bet_type, numbers: betNumbers } = bet
-  if (!betNumbers || betNumbers.length === 0) return 0
+  const winCounts: Record<string, number> = {}
+
+  if (!betNumbers || betNumbers.length === 0) return winCounts
 
   const specialPrize = results.special_prize
   const getLastDigits = (numStr: string, count: number) => numStr.slice(-count)
 
-  let totalWinCount = 0
-
   console.log(`[WIN_COUNT] Processing bet: ${bet.id}, Type: ${bet_type}, Numbers: [${betNumbers.join(", ")}]`)
-  console.log(`[WIN_COUNT] All winning 2-digit endings: [${allTwoDigitEndings.join(", ")}]`)
 
   switch (bet_type) {
     case "lo_2_so_1p":
@@ -67,10 +65,10 @@ function getBetWinCount(bet: any, results: any, allTwoDigitEndings: string[]): n
     case "lo_2_so_30p":
     case "lo_2_so_nhanh":
     case "lo": // Traditional lottery
-      // FIXED: For Lô 2 số, count each occurrence of each bet number
+      // For Lô 2 số, count occurrences for each bet number individually
       betNumbers.forEach((betNum: string) => {
         const occurrences = allTwoDigitEndings.filter((ending) => ending === betNum).length
-        totalWinCount += occurrences
+        winCounts[betNum] = occurrences
         console.log(`[WIN_COUNT] Number ${betNum}: ${occurrences} occurrences`)
       })
       break
@@ -78,7 +76,7 @@ function getBetWinCount(bet: any, results: any, allTwoDigitEndings: string[]): n
     case "lo_3_so_1p":
     case "lo_3_so_nhanh":
     case "lo_3_so": // Traditional lottery
-      // For Lô 3 số: Count each occurrence of each bet number in 3-digit endings
+      // For Lô 3 số: Count occurrences for each bet number in 3-digit endings
       const allThreeDigitEndings: string[] = []
       for (const key in results) {
         if (Object.prototype.hasOwnProperty.call(results, key)) {
@@ -92,7 +90,7 @@ function getBetWinCount(bet: any, results: any, allTwoDigitEndings: string[]): n
       }
       betNumbers.forEach((betNum: string) => {
         const occurrences = allThreeDigitEndings.filter((ending) => ending === betNum).length
-        totalWinCount += occurrences
+        winCounts[betNum] = occurrences
         console.log(`[WIN_COUNT] 3-digit number ${betNum}: ${occurrences} occurrences`)
       })
       break
@@ -102,13 +100,11 @@ function getBetWinCount(bet: any, results: any, allTwoDigitEndings: string[]): n
     case "de_dac_biet_30p":
     case "de_dac_biet_nhanh":
     case "de": // Traditional lottery
-      // For Đề, only special prize last 2 digits, count each bet number separately
+      // For Đề, only special prize last 2 digits
       const specialLast2 = getLastDigits(specialPrize, 2)
       betNumbers.forEach((betNum: string) => {
-        if (betNum === specialLast2) {
-          totalWinCount += 1
-          console.log(`[WIN_COUNT] Đề number ${betNum} matches special prize ending ${specialLast2}`)
-        }
+        winCounts[betNum] = betNum === specialLast2 ? 1 : 0
+        console.log(`[WIN_COUNT] Đề number ${betNum}: ${winCounts[betNum]} occurrences`)
       })
       break
 
@@ -118,10 +114,8 @@ function getBetWinCount(bet: any, results: any, allTwoDigitEndings: string[]): n
       // For Nhất tố, last 1 digit of special prize
       const specialLast1 = getLastDigits(specialPrize, 1)
       betNumbers.forEach((betNum: string) => {
-        if (betNum === specialLast1) {
-          totalWinCount += 1
-          console.log(`[WIN_COUNT] Nhất tố number ${betNum} matches special prize last digit ${specialLast1}`)
-        }
+        winCounts[betNum] = betNum === specialLast1 ? 1 : 0
+        console.log(`[WIN_COUNT] Nhất tố number ${betNum}: ${winCounts[betNum]} occurrences`)
       })
       break
 
@@ -132,12 +126,8 @@ function getBetWinCount(bet: any, results: any, allTwoDigitEndings: string[]): n
       const firstDigitSpecial = specialPrize.slice(0, 1)
       const lastDigitSpecial = getLastDigits(specialPrize, 1)
       betNumbers.forEach((betNum: string) => {
-        if (betNum === firstDigitSpecial || betNum === lastDigitSpecial) {
-          totalWinCount += 1
-          console.log(
-            `[WIN_COUNT] Đầu đuôi number ${betNum} matches first ${firstDigitSpecial} or last ${lastDigitSpecial}`,
-          )
-        }
+        winCounts[betNum] = betNum === firstDigitSpecial || betNum === lastDigitSpecial ? 1 : 0
+        console.log(`[WIN_COUNT] Đầu đuôi number ${betNum}: ${winCounts[betNum]} occurrences`)
       })
       break
 
@@ -146,12 +136,13 @@ function getBetWinCount(bet: any, results: any, allTwoDigitEndings: string[]): n
     case "xien_2_30p":
     case "xien_2_nhanh":
     case "xien2": // Traditional lottery
-      // For Xiên 2, ALL numbers must be present in unique 2-digit endings
+      // For Xiên 2, ALL numbers must be present (win as a group)
       const uniqueWinningEndingsForXien2 = Array.from(new Set(allTwoDigitEndings))
-      if (betNumbers.length === 2 && betNumbers.every((num: string) => uniqueWinningEndingsForXien2.includes(num))) {
-        totalWinCount = 1 // Xiên only wins once, not per number
-        console.log(`[WIN_COUNT] Xiên 2 all numbers [${betNumbers.join(", ")}] found in results`)
-      }
+      const allXien2Present = betNumbers.every((num: string) => uniqueWinningEndingsForXien2.includes(num))
+      betNumbers.forEach((betNum: string) => {
+        winCounts[betNum] = allXien2Present ? 1 : 0
+      })
+      console.log(`[WIN_COUNT] Xiên 2 result: ${allXien2Present ? "WIN" : "LOSE"}`)
       break
 
     case "xien_3_1p":
@@ -159,12 +150,13 @@ function getBetWinCount(bet: any, results: any, allTwoDigitEndings: string[]): n
     case "xien_3_30p":
     case "xien_3_nhanh":
     case "xien3": // Traditional lottery
-      // For Xiên 3, ALL numbers must be present in unique 2-digit endings
+      // For Xiên 3, ALL numbers must be present (win as a group)
       const uniqueWinningEndingsForXien3 = Array.from(new Set(allTwoDigitEndings))
-      if (betNumbers.length === 3 && betNumbers.every((num: string) => uniqueWinningEndingsForXien3.includes(num))) {
-        totalWinCount = 1 // Xiên only wins once, not per number
-        console.log(`[WIN_COUNT] Xiên 3 all numbers [${betNumbers.join(", ")}] found in results`)
-      }
+      const allXien3Present = betNumbers.every((num: string) => uniqueWinningEndingsForXien3.includes(num))
+      betNumbers.forEach((betNum: string) => {
+        winCounts[betNum] = allXien3Present ? 1 : 0
+      })
+      console.log(`[WIN_COUNT] Xiên 3 result: ${allXien3Present ? "WIN" : "LOSE"}`)
       break
 
     case "xien_4_1p":
@@ -172,25 +164,27 @@ function getBetWinCount(bet: any, results: any, allTwoDigitEndings: string[]): n
     case "xien_4_30p":
     case "xien_4_nhanh":
     case "xien_4": // Traditional lottery
-      // For Xiên 4, ALL numbers must be present in unique 2-digit endings
+      // For Xiên 4, ALL numbers must be present (win as a group)
       const uniqueWinningEndingsForXien4 = Array.from(new Set(allTwoDigitEndings))
-      if (betNumbers.length === 4 && betNumbers.every((num: string) => uniqueWinningEndingsForXien4.includes(num))) {
-        totalWinCount = 1 // Xiên only wins once, not per number
-        console.log(`[WIN_COUNT] Xiên 4 all numbers [${betNumbers.join(", ")}] found in results`)
-      }
+      const allXien4Present = betNumbers.every((num: string) => uniqueWinningEndingsForXien4.includes(num))
+      betNumbers.forEach((betNum: string) => {
+        winCounts[betNum] = allXien4Present ? 1 : 0
+      })
+      console.log(`[WIN_COUNT] Xiên 4 result: ${allXien4Present ? "WIN" : "LOSE"}`)
       break
 
     default:
-      console.warn(`[getBetWinCount] Unknown bet type: ${bet_type}`)
-      totalWinCount = 0
+      console.warn(`[calculateIndividualWinCounts] Unknown bet type: ${bet_type}`)
   }
 
-  console.log(`[WIN_COUNT] Total win count for bet ${bet.id}: ${totalWinCount}`)
-  return totalWinCount
+  return winCounts
 }
 
-// FIXED: Function to calculate win amount based on hit count
-function calculateWinAmount(betType: string, betAmount: number, winCount: number): number {
+// CORRECTED: Function to calculate win amount with accurate formula
+// Formula: điểm × tỉ lệ thưởng × số lần xuất hiện × 1000
+function calculateWinAmount(bet: any, individualWinCounts: Record<string, number>): number {
+  const { bet_type, amount, points } = bet
+
   const multipliers: Record<string, number> = {
     // Fast lottery multipliers
     lo_2_so_1p: 99,
@@ -229,29 +223,51 @@ function calculateWinAmount(betType: string, betAmount: number, winCount: number
     xien_4: 200,
   }
 
-  const multiplier = multipliers[betType]
+  const multiplier = multipliers[bet_type]
   if (multiplier === undefined) {
-    console.warn(`[calculateWinAmount] No multiplier found for bet type: ${betType}`)
+    console.warn(`[calculateWinAmount] No multiplier found for bet type: ${bet_type}`)
     return 0
   }
 
-  // FIXED: Correct calculation
-  // For point-based betting (Lô): betAmount (points) × multiplier × winCount × 1000 (convert to VND)
-  // For direct money betting (Đề/Xiên): betAmount (VND) × multiplier × winCount
-  let winAmount = 0
+  let totalWinAmount = 0
 
-  if (betType.startsWith("lo_") || betType === "lo" || betType === "lo_2_so" || betType === "lo_3_so") {
-    // Point-based betting: points × multiplier × occurrences × 1000
-    winAmount = betAmount * multiplier * winCount * 1000
+  // Check if this is a point-based bet (Lô) or money-based bet (Đề/Xiên)
+  if (points > 0) {
+    // Point-based betting (Lô): điểm × tỉ lệ thưởng × số lần xuất hiện × 1000
+    console.log(`[calculateWinAmount] Point-based calculation for ${bet_type}:`)
+
+    for (const [number, occurrences] of Object.entries(individualWinCounts)) {
+      if (occurrences > 0) {
+        const numberWinAmount = points * multiplier * occurrences * 1000
+        totalWinAmount += numberWinAmount
+        console.log(
+          `  Number ${number}: ${points} points × ${multiplier} × ${occurrences} × 1000 = ${numberWinAmount.toLocaleString()}đ`,
+        )
+      }
+    }
+
+    console.log(`[calculateWinAmount] Total win amount: ${totalWinAmount.toLocaleString()}đ`)
   } else {
-    // Direct money betting: amount × multiplier × occurrences
-    winAmount = betAmount * multiplier * winCount
+    // Money-based betting (Đề/Xiên): amount × multiplier × total occurrences
+    const totalOccurrences = Object.values(individualWinCounts).reduce((sum, count) => sum + count, 0)
+
+    if (bet_type.includes("xien")) {
+      // For Xiên, it's all or nothing (either all numbers hit or none)
+      const allHit = Object.values(individualWinCounts).every((count) => count > 0)
+      totalWinAmount = allHit ? amount * multiplier : 0
+      console.log(
+        `[calculateWinAmount] Xiên calculation: ${amount} × ${multiplier} × ${allHit ? 1 : 0} = ${totalWinAmount.toLocaleString()}đ`,
+      )
+    } else {
+      // For other money-based bets
+      totalWinAmount = amount * multiplier * totalOccurrences
+      console.log(
+        `[calculateWinAmount] Money-based calculation: ${amount} × ${multiplier} × ${totalOccurrences} = ${totalWinAmount.toLocaleString()}đ`,
+      )
+    }
   }
 
-  console.log(
-    `[calculateWinAmount] Bet type: ${betType}, Amount: ${betAmount}, Multiplier: ${multiplier}, Win count: ${winCount}, Final win amount: ${winAmount}`,
-  )
-  return winAmount
+  return totalWinAmount
 }
 
 async function processBetsForSession(sessionId: string, results: any) {
@@ -289,49 +305,35 @@ async function processBetsForSession(sessionId: string, results: any) {
   // STEP 2: Loop through each bet and process it
   for (const bet of pendingBets) {
     try {
-      // Calculate win count using the new logic
-      const winCount = getBetWinCount(bet, results, allTwoDigitEndings)
-      const winAmount = calculateWinAmount(bet.bet_type, bet.amount, winCount)
-      const newStatus = winCount > 0 ? "won" : "lost"
+      // Call the RPC function to handle payout
+      const { data: payoutResult, error: payoutError } = await supabaseAdmin.rpc("payout_winner_with_points", {
+        p_bet_id: bet.id,
+        p_session_id: sessionId,
+        p_winning_numbers: allTwoDigitEndings, // Pass the comprehensive winning numbers
+        p_game_mode: "mien_bac", // Assuming game_mode for now, should come from session
+        p_bet_type: bet.bet_type, // Pass bet_type from the bet itself
+      })
 
-      console.log(
-        `[BETS_PROCESS] Bet ${bet.id}: Type=${bet.bet_type}, Numbers=[${bet.numbers.join(", ")}], Amount=${bet.amount} points, Hits=${winCount}, Win Amount=${winAmount}đ`,
-      )
-
-      // STEP 3: Update the bet status
-      const { error: updateBetError } = await supabaseAdmin
-        .from("user_bets")
-        .update({
-          status: newStatus,
-          win_amount: winAmount,
-          processed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", bet.id)
-
-      if (updateBetError) {
-        throw new Error(`Failed to update bet status: ${updateBetError.message}`)
+      if (payoutError) {
+        throw new Error(`Payout RPC failed for bet ${bet.id}: ${payoutError.message}`)
       }
 
-      // STEP 4: If winner, pay them
-      if (winCount > 0 && winAmount > 0) {
-        winnersCount++
-        totalWinAmount += winAmount
+      const { success, winnings, status } = payoutResult as { success: boolean; winnings: number; status: string }
 
-        // Use an RPC call to handle the transaction safely
-        const { error: payoutError } = await supabaseAdmin.rpc("payout_winner", {
-          p_user_id: bet.user_id,
-          p_bet_id: bet.id,
-          p_win_amount: winAmount,
-          p_session_id: sessionId,
-        })
-
-        if (payoutError) {
-          throw new Error(`Payout RPC failed for user ${bet.user_id}: ${payoutError.message}`)
+      if (success) {
+        processedCount++
+        if (status === "won" && winnings > 0) {
+          winnersCount++
+          totalWinAmount += winnings
+          console.log(
+            `[BETS_PROCESS] SUCCESS: Bet ${bet.id} processed. Status: ${status}, Winnings: ${winnings.toLocaleString()}đ.`,
+          )
+        } else {
+          console.log(`[BETS_PROCESS] Bet ${bet.id} processed. Status: ${status}, No winnings.`)
         }
-        console.log(`[BETS_PROCESS] SUCCESS: Paid ${winAmount}đ to user ${bet.user_id} for bet ${bet.id}.`)
+      } else {
+        throw new Error(`Payout RPC returned failure for bet ${bet.id}.`)
       }
-      processedCount++
     } catch (error: any) {
       console.error(`[BETS_PROCESS] ERROR: Failed to process bet ${bet.id}:`, error.message)
       errors.push(`Bet ${bet.id}: ${error.message}`)
@@ -339,7 +341,7 @@ async function processBetsForSession(sessionId: string, results: any) {
   }
 
   console.log(
-    `[BETS_PROCESS] Finished processing. Processed: ${processedCount}, Winners: ${winnersCount}, Total Payout: ${totalWinAmount}`,
+    `[BETS_PROCESS] Finished processing. Processed: ${processedCount}, Winners: ${winnersCount}, Total Payout: ${totalWinAmount.toLocaleString()}đ`,
   )
   console.log(`[BETS_PROCESS] ----------------------------------------------------`)
 
@@ -357,24 +359,27 @@ async function processBetsForSession(sessionId: string, results: any) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Admin check for manual trigger
+    // Authentication check (e.g., admin token or internal cron job token)
     const authHeader = request.headers.get("Authorization")
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return NextResponse.json({ error: "Unauthorized: Missing token" }, { status: 401 })
     }
+
     const token = authHeader.substring(7)
-    const admin = AuthService.verifySessionToken(token)
-    if (!admin || (admin.role !== "admin" && admin.role !== "super_admin")) {
-      return NextResponse.json({ error: "Unauthorized: Invalid admin token" }, { status: 403 })
+    const user = AuthService.verifySessionToken(token) // Assuming admin token verification
+    if (!user || user.role !== "admin") {
+      // Ensure only admins can trigger this
+      return NextResponse.json({ error: "Unauthorized: Invalid or insufficient token" }, { status: 401 })
     }
 
-    const { sessionId } = await request.json()
+    const { sessionId } = await request.json() // Removed winningNumbers from direct input, will generate
+
     if (!sessionId) {
       return NextResponse.json({ error: "sessionId is required" }, { status: 400 })
     }
 
     console.log(`[DRAW_API] ====================================================`)
-    console.log(`[DRAW_API] Admin '${admin.username}' initiated manual draw for session: ${sessionId}`)
+    console.log(`[DRAW_API] Admin '${user.username}' initiated manual draw for session: ${sessionId}`)
 
     // STEP 1: Get the session
     const { data: session, error: sessionError } = await supabaseAdmin
@@ -420,7 +425,8 @@ export async function POST(request: NextRequest) {
     console.log(`[DRAW_API] Session #${session.session_number} successfully updated to 'completed'.`)
 
     // STEP 4: Process all bets for this session
-    const betProcessingResult = await processBetsForSession(session.id, results) // Pass full results object
+    // Pass the full results object to processBetsForSession so it can calculate based on all prize types
+    const betProcessingResult = await processBetsForSession(session.id, results)
 
     console.log(`[DRAW_API] Draw and processing complete for session ${sessionId}.`)
     console.log(`[DRAW_API] ====================================================`)

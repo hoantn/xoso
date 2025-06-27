@@ -1,492 +1,80 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse, type NextRequest } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { getAuth } from "@/lib/auth"
-import { getCalculationBreakdown, validateBetSelection } from "@/app/game/utils"
-import { validateNumberFormat } from "@/app/game/utils/validation"
+import { AuthService } from "@/lib/auth"
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!)
+const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = await getAuth(request)
-    console.log("Auth result:", auth) // Add logging
-    if (!auth.user) {
-      console.log("No user found in auth") // Add logging
-      return NextResponse.json({ error: "Unauthorized - Please login first" }, { status: 401 })
+    // Authentication check
+    const authHeader = request.headers.get("Authorization")
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Unauthorized: Missing token" }, { status: 401 })
     }
 
-    const { session_id, bet_type, numbers, amount } = await request.json()
+    const token = authHeader.substring(7)
+    const user = AuthService.verifySessionToken(token)
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized: Invalid token" }, { status: 401 })
+    }
 
-    // Validate input
-    if (!session_id || !bet_type || !numbers || !Array.isArray(numbers) || numbers.length === 0) {
+    const { sessionId, betType, numbers, amount, points = 0, potentialWin } = await request.json()
+
+    // Validation
+    if (!sessionId || !betType || !numbers || potentialWin === undefined) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 
-    if (!amount || amount <= 0) {
-      return NextResponse.json({ error: "Invalid bet amount" }, { status: 400 })
+    if (!Array.isArray(numbers) || numbers.length === 0) {
+      return NextResponse.json({ error: "Numbers must be a non-empty array" }, { status: 400 })
     }
 
-    // UPDATED: Bet type configs với phân biệt rõ ràng 1p, 5p, 30p
-    const betTypeConfigs = {
-      // TRADITIONAL LOTTERY - LÔ (giữ nguyên)
-      lo: {
-        multiplier: 99,
-        min_bet: 1,
-        point_value: 29000,
-        category: "lo",
-        calculation_method: "point",
-        name: "Lô 2 số",
-      },
-      lo_2_so: {
-        multiplier: 99,
-        min_bet: 1,
-        point_value: 29000,
-        category: "lo",
-        calculation_method: "point",
-        name: "Lô 2 số",
-      },
-      lo_3_so: {
-        multiplier: 900,
-        min_bet: 1,
-        point_value: 29000,
-        category: "lo",
-        calculation_method: "point",
-        name: "Lô 3 số",
-      },
+    // Determine if this is a point-based bet (Lô) or money-based bet (Đề/Xiên)
+    const isPointBased = betType.includes("lo") && !betType.includes("de")
 
-      // TRADITIONAL LOTTERY - ĐỀ (giữ nguyên)
-      de: {
-        multiplier: 99,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Đề đặc biệt",
-      },
-      de_dac_biet: {
-        multiplier: 99,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Đề đặc biệt",
-      },
-      nhat_to: {
-        multiplier: 99,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Nhất To",
-      },
-      de_dau_duoi: {
-        multiplier: 9,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Đề đầu đuôi",
-      },
-      de_3_cang: {
-        multiplier: 900,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Đề 3 càng",
-      },
+    let finalAmount = amount
+    let finalPoints = points
+    let actualCost = 0
 
-      // TRADITIONAL LOTTERY - XIÊN (giữ nguyên)
-      xien2: {
-        multiplier: 15,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 2",
-        required_numbers: 2,
-      },
-      xien3: {
-        multiplier: 78,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 3",
-        required_numbers: 3,
-      },
-
-      // FAST LOTTERY 1P - LÔ
-      lo_2_so_1p: {
-        multiplier: 99,
-        min_bet: 1,
-        point_value: 29000,
-        category: "lo",
-        calculation_method: "point",
-        name: "Lô 2 số (1p)",
-      },
-      lo_3_so_1p: {
-        multiplier: 900,
-        min_bet: 1,
-        point_value: 29000,
-        category: "lo",
-        calculation_method: "point",
-        name: "Lô 3 số (1p)",
-      },
-
-      // FAST LOTTERY 1P - ĐỀ
-      de_dac_biet_1p: {
-        multiplier: 99,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Đề đặc biệt (1p)",
-      },
-      nhat_to_1p: {
-        multiplier: 99,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Nhất To (1p)",
-      },
-      de_dau_duoi_1p: {
-        multiplier: 9,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Đề đầu đuôi (1p)",
-      },
-
-      // FAST LOTTERY 1P - XIÊN
-      xien_2_1p: {
-        multiplier: 15,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 2 (1p)",
-        required_numbers: 2,
-      },
-      xien_3_1p: {
-        multiplier: 78,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 3 (1p)",
-        required_numbers: 3,
-      },
-      xien_4_1p: {
-        multiplier: 300,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 4 (1p)",
-        required_numbers: 4,
-      },
-
-      // FAST LOTTERY 5P - LÔ
-      lo_2_so_5p: {
-        multiplier: 99,
-        min_bet: 1,
-        point_value: 29000,
-        category: "lo",
-        calculation_method: "point",
-        name: "Lô 2 số (5p)",
-      },
-      lo_3_so_5p: {
-        multiplier: 900,
-        min_bet: 1,
-        point_value: 29000,
-        category: "lo",
-        calculation_method: "point",
-        name: "Lô 3 số (5p)",
-      },
-
-      // FAST LOTTERY 5P - ĐỀ
-      de_dac_biet_5p: {
-        multiplier: 99,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Đề đặc biệt (5p)",
-      },
-      nhat_to_5p: {
-        multiplier: 99,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Nhất To (5p)",
-      },
-      de_dau_duoi_5p: {
-        multiplier: 9,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Đề đầu đuôi (5p)",
-      },
-
-      // FAST LOTTERY 5P - XIÊN
-      xien_2_5p: {
-        multiplier: 15,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 2 (5p)",
-        required_numbers: 2,
-      },
-      xien_3_5p: {
-        multiplier: 78,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 3 (5p)",
-        required_numbers: 3,
-      },
-      xien_4_5p: {
-        multiplier: 300,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 4 (5p)",
-        required_numbers: 4,
-      },
-
-      // FAST LOTTERY 30P - LÔ
-      lo_2_so_30p: {
-        multiplier: 99,
-        min_bet: 1,
-        point_value: 29000,
-        category: "lo",
-        calculation_method: "point",
-        name: "Lô 2 số (30p)",
-      },
-      lo_3_so_30p: {
-        multiplier: 900,
-        min_bet: 1,
-        point_value: 29000,
-        category: "lo",
-        calculation_method: "point",
-        name: "Lô 3 số (30p)",
-      },
-
-      // FAST LOTTERY 30P - ĐỀ
-      de_dac_biet_30p: {
-        multiplier: 99,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Đề đặc biệt (30p)",
-      },
-      nhat_to_30p: {
-        multiplier: 99,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Nhất To (30p)",
-      },
-      de_dau_duoi_30p: {
-        multiplier: 9,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Đề đầu đuôi (30p)",
-      },
-
-      // FAST LOTTERY 30P - XIÊN
-      xien_2_30p: {
-        multiplier: 15,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 2 (30p)",
-        required_numbers: 2,
-      },
-      xien_3_30p: {
-        multiplier: 78,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 3 (30p)",
-        required_numbers: 3,
-      },
-      xien_4_30p: {
-        multiplier: 300,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 4 (30p)",
-        required_numbers: 4,
-      },
-
-      // Backward compatibility - old bet types
-      lo_2_so_nhanh: {
-        multiplier: 99,
-        min_bet: 1,
-        point_value: 29000,
-        category: "lo",
-        calculation_method: "point",
-        name: "Lô 2 số nhanh",
-      },
-      lo_3_so_nhanh: {
-        multiplier: 900,
-        min_bet: 1,
-        point_value: 29000,
-        category: "lo",
-        calculation_method: "point",
-        name: "Lô 3 số nhanh",
-      },
-      de_dac_biet_nhanh: {
-        multiplier: 99,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Đề đặc biệt nhanh",
-      },
-      nhat_to_nhanh: {
-        multiplier: 99,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Nhất To nhanh",
-      },
-      de_dau_duoi_nhanh: {
-        multiplier: 9,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Đề đầu đuôi nhanh",
-      },
-      de_3_cang_nhanh: {
-        multiplier: 900,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Đề 3 càng nhanh",
-      },
-      xien_2_nhanh: {
-        multiplier: 15,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 2 nhanh",
-        required_numbers: 2,
-      },
-      xien_3_nhanh: {
-        multiplier: 78,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 3 nhanh",
-        required_numbers: 3,
-      },
-      xien_4_nhanh: {
-        multiplier: 300,
-        min_bet: 1000,
-        point_value: 1,
-        category: "de",
-        calculation_method: "money",
-        name: "Xiên 4 nhanh",
-        required_numbers: 4,
-      },
+    if (isPointBased) {
+      // For point-based betting (Lô), calculate total cost
+      if (!points || points <= 0) {
+        return NextResponse.json({ error: "Points required for Lô betting" }, { status: 400 })
+      }
+      // Cost = points × number_of_selected_numbers × 29,000 VND per point
+      actualCost = points * numbers.length * 29000
+      finalAmount = actualCost // Store the actual cost in amount field
+      finalPoints = points
+    } else {
+      // For money-based betting (Đề/Xiên)
+      if (!amount || amount <= 0) {
+        return NextResponse.json({ error: "Amount required for Đề/Xiên betting" }, { status: 400 })
+      }
+      actualCost = amount
+      finalAmount = amount
+      finalPoints = 0
     }
 
-    const betConfig = betTypeConfigs[bet_type as keyof typeof betTypeConfigs]
-    if (!betConfig) {
-      return NextResponse.json({ error: "Invalid bet type" }, { status: 400 })
-    }
+    console.log(`[PLACE_BET] User ${user.id} placing bet:`, {
+      sessionId,
+      betType,
+      numbers,
+      finalAmount,
+      finalPoints,
+      actualCost,
+      isPointBased,
+    })
 
-    // ENHANCED: Validation for bet selection and number format
-    const betValidation = validateBetSelection(bet_type, numbers)
-    if (!betValidation.isValid) {
-      return NextResponse.json({ error: betValidation.message }, { status: 400 })
-    }
-
-    const formatValidation = validateNumberFormat(bet_type, numbers)
-    if (!formatValidation.isValid) {
-      return NextResponse.json({ error: formatValidation.message }, { status: 400 })
-    }
-
-    // Additional validation for exact number requirements
-    if (betConfig.required_numbers && numbers.length !== betConfig.required_numbers) {
-      return NextResponse.json(
-        {
-          error: `${betConfig.name} cần chọn đúng ${betConfig.required_numbers} số.`,
-        },
-        { status: 400 },
-      )
-    }
-
-    // Validate minimum bet
-    if (amount < betConfig.min_bet) {
-      const minBetDisplay =
-        betConfig.calculation_method === "point"
-          ? `${betConfig.min_bet} điểm`
-          : `${betConfig.min_bet.toLocaleString("vi-VN")}đ`
-
-      return NextResponse.json(
-        {
-          error: `Minimum bet is ${minBetDisplay}`,
-        },
-        { status: 400 },
-      )
-    }
-
-    // Use the corrected calculation logic
-    const calculation = getCalculationBreakdown(betConfig, amount, numbers.length)
-    const totalCost = Number.parseInt(calculation.totalCostDisplay.replace(/[^\d]/g, ""))
-    const totalWin = Number.parseInt(calculation.totalWinDisplay.replace(/[^\d]/g, ""))
-
-    // Check user balance - CHANGED FROM user_profiles TO users
-    const { data: userProfile, error: profileError } = await supabase
-      .from("users")
-      .select("balance")
-      .eq("id", auth.user.id)
-      .single()
-
-    if (profileError || !userProfile) {
-      return NextResponse.json({ error: "User profile not found" }, { status: 404 })
-    }
-
-    if (userProfile.balance < totalCost) {
-      return NextResponse.json(
-        {
-          error: `Insufficient balance. Required: ${totalCost.toLocaleString("vi-VN")} VND`,
-        },
-        { status: 400 },
-      )
-    }
-
-    // Check if session is still open
-    const { data: session, error: sessionError } = await supabase
+    // Check if session is open for betting
+    const { data: session, error: sessionError } = await supabaseAdmin
       .from("game_sessions")
       .select("*")
-      .eq("id", session_id)
+      .eq("id", sessionId)
       .single()
 
     if (sessionError || !session) {
+      console.error("[PLACE_BET] Session not found:", sessionError)
       return NextResponse.json({ error: "Session not found" }, { status: 404 })
     }
 
@@ -494,33 +82,116 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Session is not open for betting" }, { status: 400 })
     }
 
-    // Start transaction
-    const { data, error } = await supabase.rpc("place_bet_transaction", {
-      p_user_id: auth.user.id,
-      p_session_id: session_id,
-      p_bet_type: bet_type,
+    // Check if betting is still allowed (before end time)
+    const now = new Date()
+    const endTime = new Date(session.end_time)
+    if (now >= endTime) {
+      return NextResponse.json({ error: "Betting time has ended for this session" }, { status: 400 })
+    }
+
+    // Use the database function to place the bet
+    const { data: result, error: betError } = await supabaseAdmin.rpc("place_bet_transaction_with_points", {
+      p_user_id: user.id,
+      p_session_id: sessionId,
+      p_bet_type: betType,
       p_numbers: numbers,
-      p_amount: totalCost,
-      p_potential_win: totalWin,
-      p_total_cost: totalCost,
+      p_amount: finalAmount,
+      p_points: finalPoints,
+      p_potential_win: potentialWin, // 🆕 gửi xuống DB
     })
 
+    if (betError) {
+      console.error("[PLACE_BET] Database error:", betError)
+      return NextResponse.json(
+        {
+          error: "Failed to place bet",
+          details: betError.message,
+        },
+        { status: 500 },
+      )
+    }
+
+    console.log(`[PLACE_BET] Bet placed successfully:`, result)
+
+    return NextResponse.json({
+      success: true,
+      message: isPointBased
+        ? `Đặt cược thành công: ${finalPoints} điểm (${actualCost.toLocaleString()}đ)`
+        : `Đặt cược thành công: ${finalAmount.toLocaleString()}đ`,
+      bet: result,
+      cost_breakdown: {
+        is_point_based: isPointBased,
+        points: finalPoints,
+        cost_per_point: isPointBased ? 29000 : 0,
+        total_cost: actualCost,
+        numbers_count: numbers.length,
+      },
+      session: {
+        id: session.id,
+        session_number: session.session_number,
+        end_time: session.end_time,
+      },
+    })
+  } catch (error: any) {
+    console.error("[PLACE_BET] Unexpected error:", error)
+    return NextResponse.json(
+      {
+        error: "Internal server error",
+        details: error.message,
+      },
+      { status: 500 },
+    )
+  }
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    // Authentication check
+    const authHeader = request.headers.get("Authorization")
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Unauthorized: Missing token" }, { status: 401 })
+    }
+
+    const token = authHeader.substring(7)
+    const user = AuthService.verifySessionToken(token)
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized: Invalid token" }, { status: 401 })
+    }
+
+    // Get user's recent bets
+    const { data: bets, error } = await supabase
+      .from("user_bets")
+      .select(`
+        *,
+        game_sessions (
+          session_number,
+          game_mode,
+          status,
+          start_time,
+          end_time
+        )
+      `)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(20)
+
     if (error) {
-      console.error("Place bet error:", error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      console.error("[GET_BETS] Database error:", error)
+      return NextResponse.json({ error: "Failed to fetch bets" }, { status: 500 })
     }
 
     return NextResponse.json({
       success: true,
-      bet_id: data.bet_id,
-      potential_win: totalWin,
-      total_cost: totalCost,
-      net_profit: totalWin - totalCost,
-      message: "Bet placed successfully",
-      calculation_breakdown: calculation,
+      bets: bets || [],
     })
-  } catch (error) {
-    console.error("Place bet API error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  } catch (error: any) {
+    console.error("[GET_BETS] Unexpected error:", error)
+    return NextResponse.json(
+      {
+        error: "Internal server error",
+        details: error.message,
+      },
+      { status: 500 },
+    )
   }
 }
