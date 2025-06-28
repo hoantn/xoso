@@ -5,14 +5,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   Loader2,
   Trophy,
@@ -23,8 +16,10 @@ import {
   GamepadIcon,
   ChevronLeft,
   ChevronRight,
-  Copy,
-  CheckCircle,
+  Hash,
+  Calculator,
+  DollarSign,
+  Clock,
 } from "lucide-react"
 
 interface BettingTransaction {
@@ -57,14 +52,22 @@ interface BettingStats {
   todayAmount: number
 }
 
-interface BettingDetails {
-  betType: string
+interface BettingDetail {
+  id: string
+  session_number: string
+  game_mode: string
+  bet_type: string
   numbers: string[]
+  bet_amount: number
   points: number
-  session: string
-  cost: number
-  winningNumbers?: { number: string; count: number }[]
-  gameMode: string
+  potential_win: number
+  actual_win?: number
+  status: string
+  created_at: string
+  processed_at?: string
+  winning_numbers: string[]
+  hit_count: { [key: string]: number }
+  session_info: any
 }
 
 interface BettingHistoryProps {
@@ -79,125 +82,12 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [activeFilter, setActiveFilter] = useState<"all" | "bet" | "win">("all")
-  const [copiedText, setCopiedText] = useState<string | null>(null)
 
-  const parseBettingDetails = (transaction: BettingTransaction): BettingDetails | null => {
-    const { description, type } = transaction
-
-    if (type === "purchase" && description.includes("Cược")) {
-      // Parse betting transaction
-      // Example: "Cược lô_2_số_30p: 20 điểm (10 số) - Chi phí: 5800000 VND - Phiên 3056 | Số tiền: 5.800.000đ"
-
-      const betTypeMatch = description.match(/Cược\s+([^:]+)/)
-      const pointsMatch = description.match(/(\d+)\s*điểm/)
-      const numbersCountMatch = description.match(/$$(\d+)\s*số$$/)
-      const sessionMatch = description.match(/Phiên\s+(\d+)/)
-      const costMatch = description.match(/Chi phí:\s*(\d+)/)
-
-      if (betTypeMatch && pointsMatch) {
-        const betType = betTypeMatch[1].trim()
-        const points = Number.parseInt(pointsMatch[1])
-        const numbersCount = numbersCountMatch ? Number.parseInt(numbersCountMatch[1]) : 0
-        const session = sessionMatch ? sessionMatch[1] : "N/A"
-        const cost = costMatch ? Number.parseInt(costMatch[1]) : Math.abs(transaction.amount)
-
-        // Generate example numbers based on bet type and count
-        const numbers = generateExampleNumbers(betType, numbersCount)
-
-        return {
-          betType,
-          numbers,
-          points,
-          session,
-          cost,
-          gameMode: getBetGameMode(betType),
-        }
-      }
-    } else if (type === "bet_won" && description.includes("Thắng cược")) {
-      // Parse winning transaction
-      // Example: "Thắng cược phiên 3056"
-
-      const sessionMatch = description.match(/phiên\s+(\d+)/)
-      const session = sessionMatch ? sessionMatch[1] : "N/A"
-
-      // For winning transactions, we'll show example winning numbers
-      const winningNumbers = generateWinningNumbers()
-
-      return {
-        betType: "Thắng cược",
-        numbers: [],
-        points: 0,
-        session,
-        cost: 0,
-        winningNumbers,
-        gameMode: "Lô đề",
-      }
-    }
-
-    return null
-  }
-
-  const generateExampleNumbers = (betType: string, count: number): string[] => {
-    const numbers: string[] = []
-
-    if (betType.includes("lô_2_số")) {
-      // Generate 2-digit numbers
-      const baseNumbers = ["12", "34", "56", "78", "90", "23", "45", "67", "89", "01"]
-      for (let i = 0; i < Math.min(count, baseNumbers.length); i++) {
-        numbers.push(baseNumbers[i])
-      }
-    } else if (betType.includes("lô_3_số")) {
-      // Generate 3-digit numbers
-      const baseNumbers = ["123", "456", "789", "012", "345", "678", "901", "234", "567", "890"]
-      for (let i = 0; i < Math.min(count, baseNumbers.length); i++) {
-        numbers.push(baseNumbers[i])
-      }
-    } else if (betType.includes("đề")) {
-      // Generate đề numbers
-      const baseNumbers = ["12", "34", "56", "78", "90", "23", "45", "67", "89", "01"]
-      for (let i = 0; i < Math.min(count, baseNumbers.length); i++) {
-        numbers.push(baseNumbers[i])
-      }
-    } else {
-      // Default case
-      for (let i = 0; i < count; i++) {
-        numbers.push(
-          Math.floor(Math.random() * 100)
-            .toString()
-            .padStart(2, "0"),
-        )
-      }
-    }
-
-    return numbers
-  }
-
-  const generateWinningNumbers = (): { number: string; count: number }[] => {
-    // Example winning numbers with their appearance count
-    return [
-      { number: "12", count: 2 },
-      { number: "34", count: 1 },
-      { number: "56", count: 3 },
-      { number: "78", count: 1 },
-    ]
-  }
-
-  const getBetGameMode = (betType: string): string => {
-    if (betType.includes("lô")) return "Lô đề"
-    if (betType.includes("đề")) return "Đề"
-    if (betType.includes("xskt")) return "XSKT"
-    return "Lô đề"
-  }
-
-  const copyToClipboard = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopiedText(text)
-      setTimeout(() => setCopiedText(null), 2000)
-    } catch (err) {
-      console.error("Failed to copy text: ", err)
-    }
-  }
+  // Detail modal state
+  const [selectedTransaction, setSelectedTransaction] = useState<BettingTransaction | null>(null)
+  const [bettingDetail, setBettingDetail] = useState<BettingDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [showDetailModal, setShowDetailModal] = useState(false)
 
   const fetchBettingHistory = async (page = 1, type?: string) => {
     if (!token) {
@@ -253,6 +143,45 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
     }
   }
 
+  const fetchBettingDetail = async (transaction: BettingTransaction) => {
+    setDetailLoading(true)
+    setBettingDetail(null)
+
+    try {
+      const params = new URLSearchParams({
+        transaction_id: transaction.id,
+      })
+
+      if (transaction.game_bet_id) {
+        params.append("game_bet_id", transaction.game_bet_id)
+      }
+
+      const response = await fetch(`/api/game/betting-details?${params}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        if (result.success && result.betting_details) {
+          setBettingDetail(result.betting_details)
+        }
+      }
+    } catch (error) {
+      console.error("[BettingHistory] Detail fetch error:", error)
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  const handleShowDetail = async (transaction: BettingTransaction) => {
+    setSelectedTransaction(transaction)
+    setShowDetailModal(true)
+    await fetchBettingDetail(transaction)
+  }
+
   useEffect(() => {
     fetchBettingHistory(1, activeFilter)
   }, [token, activeFilter])
@@ -282,6 +211,10 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
     }
   }
 
+  const formatCurrency = (amount: number) => {
+    return amount.toLocaleString("vi-VN")
+  }
+
   const getStatusBadge = (transaction: BettingTransaction) => {
     if (transaction.is_win) {
       return (
@@ -299,6 +232,150 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
       )
     }
     return null
+  }
+
+  const getBetTypeDisplay = (betType: string) => {
+    const typeMap: { [key: string]: string } = {
+      lo_2_so: "Lô 2 Số",
+      lo_3_so: "Lô 3 Số",
+      de: "Đề",
+      xien: "Xiên",
+      lo_2_so_30p: "Lô 2 Số 30p",
+      lo_2_so_1p: "Lô 2 Số 1p",
+      lo_2_so_5p: "Lô 2 Số 5p",
+      de_dac_biet_1p: "Đề Đặc Biệt 1p",
+      de_dac_biet_5p: "Đề Đặc Biệt 5p",
+      de_dac_biet_30p: "Đề Đặc Biệt 30p",
+      xien_2_1p: "Xiên 2 - 1p",
+      xien_3_1p: "Xiên 3 - 1p",
+      xien_4_1p: "Xiên 4 - 1p",
+    }
+    return typeMap[betType] || betType
+  }
+
+  const parseDetailedDescription = (description: string) => {
+    console.log("[BettingHistory] Parsing description:", description)
+
+    const result: any = {}
+
+    // Check if this is a winning transaction description
+    if (description.includes("🏆 Thắng cược")) {
+      return parseWinningDescription(description)
+    }
+
+    // Extract numbers from the beginning of description
+    const numbersMatch = description.match(/🎯\s*[^:]+:\s*([0-9, ]+)/u)
+    if (numbersMatch) {
+      result.numbers = numbersMatch[1].split(", ").map((n) => n.trim())
+    }
+
+    // Parse different parts separated by " | "
+    const parts = description.split(" | ")
+
+    parts.forEach((part) => {
+      // Match pattern: "10 điểm/số (290.000đ/số)" or "10 điểm/số (290,000đ/số)"
+      const pointsCostMatch = part.match(/(\d+)\s*điểm\/số\s*$$([^)]+)\/số$$/)
+      if (pointsCostMatch) {
+        result.pointsPerNumber = Number.parseInt(pointsCostMatch[1])
+        result.costPerNumber = pointsCostMatch[2]
+      }
+
+      // Match pattern: "10 số"
+      const numbersCountMatch = part.match(/(\d+)\s*số/)
+      if (numbersCountMatch) {
+        result.numbersCount = Number.parseInt(numbersCountMatch[1])
+      }
+
+      // Match pattern: "Tổng: 2.900.000đ" or "Tổng: 2,900,000đ"
+      const totalCostMatch = part.match(/Tổng:\s*([0-9.,]+đ)/)
+      if (totalCostMatch) {
+        result.totalCost = totalCostMatch[1].trim()
+      }
+
+      // Match pattern: "Phiên: 1388"
+      const sessionMatch = part.match(/Phiên:\s*(.+)/)
+      if (sessionMatch) {
+        result.sessionNumber = sessionMatch[1].trim()
+      }
+    })
+
+    // Calculate total points if we have the data
+    if (result.pointsPerNumber && result.numbersCount) {
+      result.totalPoints = result.pointsPerNumber * result.numbersCount
+    }
+
+    // If we still don't have points per number, try to infer from common patterns
+    if (!result.pointsPerNumber && result.numbersCount) {
+      result.pointsPerNumber = 10
+      result.totalPoints = result.pointsPerNumber * result.numbersCount
+    }
+
+    console.log("[BettingHistory] Parsed result:", result)
+    return result
+  }
+
+  const parseWinningDescription = (description: string) => {
+    // Parse winning transaction description
+    // Format: 🏆 Thắng cược Lô 2 Số: Số trúng [76 (2 lần), 05 (1 lần)] | 10 điểm/số | Tổng 3 lần trúng | Phiên 1388 | Thưởng: 2.970.000đ
+
+    const result: any = { isWinning: true }
+
+    // Extract bet type
+    const betTypeMatch = description.match(/🏆 Thắng cược ([^:]+):/)
+    if (betTypeMatch) {
+      result.betType = betTypeMatch[1].trim()
+    }
+
+    // Extract winning numbers with hit counts - FIXED REGEX
+    const winningNumbersMatch = description.match(/Số trúng \[([^\]]+)\]/)
+    if (winningNumbersMatch) {
+      const winningNumbersStr = winningNumbersMatch[1]
+      result.winningNumbers = []
+      result.hitCounts = {}
+
+      // Parse individual winning numbers: "76 (2 lần), 05 (1 lần)"
+      const numberMatches = winningNumbersStr.match(/(\d+)\s*$$(\d+)\s*lần$$/g)
+      if (numberMatches) {
+        numberMatches.forEach((match) => {
+          const [, number, count] = match.match(/(\d+)\s*$$(\d+)\s*lần$$/) || []
+          if (number && count) {
+            result.winningNumbers.push(number)
+            result.hitCounts[number] = Number.parseInt(count)
+          }
+        })
+      }
+    }
+
+    // Extract points per number or amount per number
+    const pointsMatch = description.match(/(\d+)\s*điểm\/số/)
+    if (pointsMatch) {
+      result.pointsPerNumber = Number.parseInt(pointsMatch[1])
+    }
+
+    const amountMatch = description.match(/([0-9.,]+đ)\/số/)
+    if (amountMatch) {
+      result.amountPerNumber = amountMatch[1]
+    }
+
+    // Extract total hits
+    const totalHitsMatch = description.match(/Tổng\s*(\d+)\s*lần trúng/)
+    if (totalHitsMatch) {
+      result.totalHits = Number.parseInt(totalHitsMatch[1])
+    }
+
+    // Extract session number
+    const sessionMatch = description.match(/Phiên\s*([^|]+)/)
+    if (sessionMatch) {
+      result.sessionNumber = sessionMatch[1].trim()
+    }
+
+    // Extract total winnings
+    const winningsMatch = description.match(/Thưởng:\s*([0-9.,]+đ)/)
+    if (winningsMatch) {
+      result.totalWinnings = winningsMatch[1]
+    }
+
+    return result
   }
 
   if (loading && transactions.length === 0) {
@@ -384,7 +461,7 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
           ) : (
             <div className="space-y-4">
               {transactions.map((transaction) => {
-                const bettingDetails = parseBettingDetails(transaction)
+                const parsedDetails = parseDetailedDescription(transaction.description)
 
                 return (
                   <Card key={transaction.id} className="hover:shadow-md transition-shadow">
@@ -397,222 +474,78 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
                           </div>
 
                           <div className="mb-2">
-                            <p className="font-medium text-gray-900">{transaction.enhanced_description}</p>
+                            <p className="font-medium text-gray-900 leading-relaxed">
+                              {transaction.enhanced_description || transaction.description}
+                            </p>
+
+                            {/* Enhanced details for winning transactions */}
+                            {parsedDetails.isWinning && parsedDetails.winningNumbers && (
+                              <div className="mt-2 p-3 bg-green-50 rounded-lg border border-green-200">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <Trophy className="w-4 h-4 text-green-600" />
+                                  <span className="text-sm font-medium text-green-800">Số đã cược trúng giải</span>
+                                </div>
+                                <div className="space-y-2">
+                                  <div className="flex flex-wrap gap-1">
+                                    <span className="text-xs text-green-700">Số trúng:</span>
+                                    {parsedDetails.winningNumbers.map((number: string, index: number) => (
+                                      <Badge key={index} className="bg-green-100 text-green-800 text-xs">
+                                        {number} ({parsedDetails.hitCounts[number]} lần)
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                  <div className="text-xs text-green-700">
+                                    <span className="font-medium">Tổng: {parsedDetails.totalHits} lần trúng</span>
+                                    {parsedDetails.pointsPerNumber && (
+                                      <span> • {parsedDetails.pointsPerNumber} điểm/số</span>
+                                    )}
+                                    {parsedDetails.amountPerNumber && (
+                                      <span> • {parsedDetails.amountPerNumber}/số</span>
+                                    )}
+                                  </div>
+                                  <div className="text-sm font-bold text-green-800">
+                                    💰 Thưởng: {parsedDetails.totalWinnings}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Enhanced details for betting transactions */}
+                            {!parsedDetails.isWinning && parsedDetails.numbers && (
+                              <div className="mt-2 p-2 bg-gray-50 rounded-lg">
+                                <div className="flex flex-wrap gap-1 mb-1">
+                                  <span className="text-xs text-gray-600">Số cược:</span>
+                                  {parsedDetails.numbers.map((number: string, index: number) => (
+                                    <Badge key={index} variant="outline" className="text-xs">
+                                      {number}
+                                    </Badge>
+                                  ))}
+                                </div>
+                                {(parsedDetails.pointsPerNumber ||
+                                  parsedDetails.costPerNumber ||
+                                  parsedDetails.totalPoints) && (
+                                  <div className="text-xs text-gray-600 space-y-1">
+                                    <div>
+                                      {parsedDetails.pointsPerNumber || "?"} điểm/số • {parsedDetails.numbersCount} số
+                                      {parsedDetails.costPerNumber && ` • ${parsedDetails.costPerNumber}/số`}
+                                    </div>
+                                    <div className="font-medium">
+                                      Tổng: {parsedDetails.totalPoints || "?"} điểm = {parsedDetails.totalCost || "N/A"}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
 
                           <div className="flex items-center justify-between text-sm text-gray-600">
                             <span>
                               Số dư: {transaction.formatted_balance_before}đ → {transaction.formatted_balance_after}đ
                             </span>
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <Button variant="ghost" size="sm">
-                                  <Eye className="w-4 h-4 mr-1" />
-                                  Chi tiết
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-                                <DialogHeader>
-                                  <DialogTitle className="flex items-center gap-2">
-                                    {transaction.is_win ? (
-                                      <Trophy className="w-5 h-5 text-green-600" />
-                                    ) : (
-                                      <Target className="w-5 h-5 text-blue-600" />
-                                    )}
-                                    Chi tiết giao dịch cược
-                                  </DialogTitle>
-                                  <DialogDescription>
-                                    Thông tin chi tiết về giao dịch {transaction.is_win ? "thắng cược" : "đặt cược"}
-                                  </DialogDescription>
-                                </DialogHeader>
-
-                                <div className="space-y-6">
-                                  {/* Basic Transaction Info */}
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                      <label className="text-sm font-medium text-gray-700">Loại giao dịch</label>
-                                      <div className="mt-1">{getStatusBadge(transaction)}</div>
-                                    </div>
-                                    <div>
-                                      <label className="text-sm font-medium text-gray-700">Thời gian</label>
-                                      <p className="mt-1 text-sm text-gray-900">{formatDate(transaction.created_at)}</p>
-                                    </div>
-                                  </div>
-
-                                  {/* Amount and Balance */}
-                                  <div className="grid grid-cols-3 gap-4">
-                                    <div>
-                                      <label className="text-sm font-medium text-gray-700">Số tiền</label>
-                                      <p
-                                        className={`mt-1 text-lg font-bold ${transaction.is_win ? "text-green-600" : "text-red-600"}`}
-                                      >
-                                        {transaction.is_win ? "+" : ""}
-                                        {transaction.formatted_amount}đ
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <label className="text-sm font-medium text-gray-700">Số dư trước</label>
-                                      <p className="mt-1 text-sm text-gray-900">
-                                        {transaction.formatted_balance_before}đ
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <label className="text-sm font-medium text-gray-700">Số dư sau</label>
-                                      <p className="mt-1 text-sm text-gray-900">
-                                        {transaction.formatted_balance_after}đ
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  {/* Betting Details */}
-                                  {bettingDetails && (
-                                    <div className="border-t pt-6">
-                                      <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                                        <GamepadIcon className="w-5 h-5" />
-                                        Chi tiết cược {bettingDetails.gameMode}
-                                      </h4>
-
-                                      <div className="grid grid-cols-2 gap-4 mb-4">
-                                        <div>
-                                          <label className="text-sm font-medium text-gray-700">Loại cược</label>
-                                          <p className="mt-1 text-sm text-gray-900 font-mono bg-gray-50 p-2 rounded">
-                                            {bettingDetails.betType}
-                                          </p>
-                                        </div>
-                                        <div>
-                                          <label className="text-sm font-medium text-gray-700">Phiên</label>
-                                          <p className="mt-1 text-sm text-gray-900 font-mono bg-gray-50 p-2 rounded">
-                                            #{bettingDetails.session}
-                                          </p>
-                                        </div>
-                                      </div>
-
-                                      {/* Betting Numbers */}
-                                      {transaction.is_bet && bettingDetails.numbers.length > 0 && (
-                                        <div className="mb-4">
-                                          <div className="flex items-center justify-between mb-2">
-                                            <label className="text-sm font-medium text-gray-700">
-                                              Số đã cược ({bettingDetails.numbers.length} số)
-                                            </label>
-                                            <Button
-                                              variant="ghost"
-                                              size="sm"
-                                              onClick={() => copyToClipboard(bettingDetails.numbers.join(", "))}
-                                            >
-                                              {copiedText === bettingDetails.numbers.join(", ") ? (
-                                                <CheckCircle className="w-4 h-4 text-green-600" />
-                                              ) : (
-                                                <Copy className="w-4 h-4" />
-                                              )}
-                                            </Button>
-                                          </div>
-                                          <div className="grid grid-cols-5 gap-2">
-                                            {bettingDetails.numbers.map((number, index) => (
-                                              <div
-                                                key={index}
-                                                className="bg-blue-100 text-blue-800 text-center py-2 px-3 rounded-lg font-mono font-bold"
-                                              >
-                                                {number}
-                                              </div>
-                                            ))}
-                                          </div>
-                                          <div className="mt-2 text-xs text-gray-500">
-                                            Điểm cược: {bettingDetails.points} điểm | Chi phí:{" "}
-                                            {bettingDetails.cost.toLocaleString()}đ
-                                          </div>
-                                        </div>
-                                      )}
-
-                                      {/* Winning Numbers */}
-                                      {transaction.is_win && bettingDetails.winningNumbers && (
-                                        <div className="mb-4">
-                                          <div className="flex items-center justify-between mb-2">
-                                            <label className="text-sm font-medium text-gray-700">
-                                              Số trúng thưởng ({bettingDetails.winningNumbers.length} số)
-                                            </label>
-                                            <Button
-                                              variant="ghost"
-                                              size="sm"
-                                              onClick={() =>
-                                                copyToClipboard(
-                                                  bettingDetails
-                                                    .winningNumbers!.map((w) => `${w.number}(${w.count}x)`)
-                                                    .join(", "),
-                                                )
-                                              }
-                                            >
-                                              {copiedText ===
-                                              bettingDetails.winningNumbers
-                                                .map((w) => `${w.number}(${w.count}x)`)
-                                                .join(", ") ? (
-                                                <CheckCircle className="w-4 h-4 text-green-600" />
-                                              ) : (
-                                                <Copy className="w-4 h-4" />
-                                              )}
-                                            </Button>
-                                          </div>
-                                          <div className="space-y-2">
-                                            {bettingDetails.winningNumbers.map((winNumber, index) => (
-                                              <div
-                                                key={index}
-                                                className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-3"
-                                              >
-                                                <div className="flex items-center gap-3">
-                                                  <div className="bg-green-100 text-green-800 text-center py-1 px-3 rounded font-mono font-bold">
-                                                    {winNumber.number}
-                                                  </div>
-                                                  <span className="text-sm text-gray-600">Số trúng</span>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                  <Badge variant="outline" className="bg-green-100 text-green-700">
-                                                    <Trophy className="w-3 h-3 mr-1" />
-                                                    {winNumber.count} lần
-                                                  </Badge>
-                                                </div>
-                                              </div>
-                                            ))}
-                                          </div>
-                                          <div className="mt-2 text-xs text-green-600 font-medium">
-                                            🎉 Tổng tiền thắng: +{transaction.formatted_amount}đ
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-
-                                  {/* Transaction ID */}
-                                  {transaction.game_bet_id && (
-                                    <div className="border-t pt-4">
-                                      <label className="text-sm font-medium text-gray-700">ID phiên cược</label>
-                                      <div className="flex items-center gap-2 mt-1">
-                                        <p className="text-sm text-gray-900 font-mono bg-gray-50 p-2 rounded flex-1">
-                                          {transaction.game_bet_id}
-                                        </p>
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => copyToClipboard(transaction.game_bet_id!)}
-                                        >
-                                          {copiedText === transaction.game_bet_id ? (
-                                            <CheckCircle className="w-4 h-4 text-green-600" />
-                                          ) : (
-                                            <Copy className="w-4 h-4" />
-                                          )}
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {/* Original Description */}
-                                  <div className="border-t pt-4">
-                                    <label className="text-sm font-medium text-gray-700">Mô tả gốc</label>
-                                    <p className="mt-1 text-sm text-gray-600 bg-gray-50 p-3 rounded">
-                                      {transaction.description}
-                                    </p>
-                                  </div>
-                                </div>
-                              </DialogContent>
-                            </Dialog>
+                            <Button variant="ghost" size="sm" onClick={() => handleShowDetail(transaction)}>
+                              <Eye className="w-4 h-4 mr-1" />
+                              Chi tiết
+                            </Button>
                           </div>
                         </div>
 
@@ -660,6 +593,308 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Detail Modal - ENHANCED */}
+      <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Chi tiết giao dịch</DialogTitle>
+            <DialogDescription>Thông tin chi tiết về giao dịch cược</DialogDescription>
+          </DialogHeader>
+
+          {selectedTransaction && (
+            <div className="space-y-6">
+              {/* Basic Transaction Info */}
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Loại giao dịch</label>
+                  <div className="mt-1">{getStatusBadge(selectedTransaction)}</div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Mô tả</label>
+                  <p className="mt-1 text-sm text-gray-900">
+                    {selectedTransaction.enhanced_description || selectedTransaction.description}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Số tiền</label>
+                  <p
+                    className={`mt-1 text-lg font-bold ${selectedTransaction.is_win ? "text-green-600" : "text-red-600"}`}
+                  >
+                    {selectedTransaction.is_win ? "+" : ""}
+                    {selectedTransaction.formatted_amount}đ
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Số dư trước</label>
+                    <p className="mt-1 text-sm text-gray-900">{selectedTransaction.formatted_balance_before}đ</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Số dư sau</label>
+                    <p className="mt-1 text-sm text-gray-900">{selectedTransaction.formatted_balance_after}đ</p>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Thời gian</label>
+                  <p className="mt-1 text-sm text-gray-900">{formatDate(selectedTransaction.created_at)}</p>
+                </div>
+              </div>
+
+              {/* Enhanced Betting Details from API */}
+              {detailLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-purple-600" />
+                  <span className="ml-2 text-sm text-gray-600">Đang tải chi tiết cược...</span>
+                </div>
+              ) : bettingDetail ? (
+                <div className="border-t pt-6 space-y-6">
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                    <Hash className="w-5 h-5 mr-2" />
+                    Chi tiết cược
+                  </h3>
+
+                  {/* Betting Summary */}
+                  <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                    <h4 className="text-sm font-semibold text-blue-900 mb-3 flex items-center">
+                      <Calculator className="w-4 h-4 mr-2" />
+                      Thông tin cược
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-medium text-blue-700">Loại cược</label>
+                        <p className="text-sm font-bold text-blue-900">{getBetTypeDisplay(bettingDetail.bet_type)}</p>
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-blue-700">Phiên cược</label>
+                        <p className="text-sm font-bold text-blue-900">#{bettingDetail.session_number}</p>
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-blue-700">Số lượng số</label>
+                        <p className="text-sm font-bold text-blue-900">{bettingDetail.numbers.length} số</p>
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-blue-700">Trạng thái</label>
+                        <Badge
+                          className={
+                            bettingDetail.status === "won"
+                              ? "bg-green-100 text-green-800"
+                              : bettingDetail.status === "lost"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-yellow-100 text-yellow-800"
+                          }
+                        >
+                          {bettingDetail.status === "won"
+                            ? "Thắng"
+                            : bettingDetail.status === "lost"
+                              ? "Thua"
+                              : "Đang chờ"}
+                        </Badge>
+                      </div>
+                      {bettingDetail.points > 0 && (
+                        <div>
+                          <label className="text-xs font-medium text-blue-700">Điểm cược</label>
+                          <p className="text-sm font-bold text-blue-900">{bettingDetail.points} điểm/số</p>
+                        </div>
+                      )}
+                      <div>
+                        <label className="text-xs font-medium text-blue-700">Tiền cược</label>
+                        <p className="text-sm font-bold text-blue-900">{formatCurrency(bettingDetail.bet_amount)}đ</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Numbers Bet */}
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-3 block flex items-center">
+                      <Hash className="w-4 h-4 mr-1" />
+                      Số đã cược ({bettingDetail.numbers.length} số)
+                    </label>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <div className="flex flex-wrap gap-2">
+                        {bettingDetail.numbers.map((number: string, index: number) => (
+                          <Badge
+                            key={index}
+                            variant="outline"
+                            className={`px-3 py-2 text-sm font-mono ${
+                              Object.keys(bettingDetail.hit_count).includes(number)
+                                ? "bg-green-100 text-green-800 border-green-300"
+                                : "bg-white text-gray-700 border-gray-300"
+                            }`}
+                          >
+                            {number}
+                            {Object.keys(bettingDetail.hit_count).includes(number) && (
+                              <span className="ml-1 text-xs">✓</span>
+                            )}
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="mt-3 text-xs text-gray-600 space-y-1">
+                        <div className="flex items-center">
+                          <DollarSign className="w-3 h-3 inline mr-1" />
+                          {bettingDetail.points > 0
+                            ? `Mỗi số: ${bettingDetail.points} điểm = ${formatCurrency(bettingDetail.points * 29000)}đ`
+                            : `Tổng tiền cược: ${formatCurrency(bettingDetail.bet_amount)}đ`}
+                        </div>
+                        <div className="flex items-center">
+                          <Calculator className="w-3 h-3 inline mr-1" />
+                          Tiềm năng thắng: {formatCurrency(bettingDetail.potential_win)}đ
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Winning Details for Won Bets */}
+                  {selectedTransaction.is_win && Object.keys(bettingDetail.hit_count).length > 0 && (
+                    <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                      <h4 className="text-sm font-semibold text-green-900 mb-3 flex items-center">
+                        <Trophy className="w-4 h-4 mr-2" />
+                        Chi tiết thắng cược
+                      </h4>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-xs font-medium text-green-700 block mb-2">
+                            Số trúng giải ({Object.keys(bettingDetail.hit_count).length} số)
+                          </label>
+                          <div className="flex flex-wrap gap-2">
+                            {Object.entries(bettingDetail.hit_count).map(([number, count]) => (
+                              <div key={number} className="bg-green-100 p-2 rounded border border-green-200">
+                                <div className="flex items-center justify-between">
+                                  <Badge className="bg-green-200 text-green-800 mr-2 px-2 py-1 text-sm font-mono">
+                                    {number}
+                                  </Badge>
+                                  <span className="text-sm font-bold text-green-800">{count} lần</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-xs font-medium text-green-700">Tổng lần trúng</label>
+                            <p className="text-lg font-bold text-green-900">
+                              {Object.values(bettingDetail.hit_count).reduce(
+                                (sum: number, count: number) => sum + count,
+                                0,
+                              )}{" "}
+                              lần
+                            </p>
+                          </div>
+                          <div>
+                            <label className="text-xs font-medium text-green-700">Tiền thắng</label>
+                            <p className="text-lg font-bold text-green-900">
+                              +{formatCurrency(bettingDetail.actual_win || 0)}đ
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Win Calculation Breakdown */}
+                        <div className="bg-green-100 p-3 rounded border border-green-200">
+                          <h5 className="text-xs font-semibold text-green-800 mb-2">Công thức tính thưởng:</h5>
+                          <div className="text-xs text-green-700 space-y-1">
+                            {bettingDetail.points > 0 ? (
+                              <div>
+                                <div>
+                                  • {bettingDetail.points} điểm/số × 99 (tỷ lệ) ×{" "}
+                                  {Object.values(bettingDetail.hit_count).reduce(
+                                    (sum: number, count: number) => sum + count,
+                                    0,
+                                  )}{" "}
+                                  lần × 1000
+                                </div>
+                                <div className="font-bold">= {formatCurrency(bettingDetail.actual_win || 0)}đ</div>
+                              </div>
+                            ) : (
+                              <div>
+                                <div>
+                                  • {formatCurrency(bettingDetail.bet_amount)}đ × 99 (tỷ lệ) ×{" "}
+                                  {Object.values(bettingDetail.hit_count).reduce(
+                                    (sum: number, count: number) => sum + count,
+                                    0,
+                                  )}{" "}
+                                  lần
+                                </div>
+                                <div className="font-bold">= {formatCurrency(bettingDetail.actual_win || 0)}đ</div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Session Results */}
+                  {bettingDetail.winning_numbers && bettingDetail.winning_numbers.length > 0 && (
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 mb-3 block">
+                        Kết quả phiên #{bettingDetail.session_number} ({bettingDetail.winning_numbers.length} số)
+                      </label>
+                      <div className="bg-gray-50 p-4 rounded-lg">
+                        <div className="flex flex-wrap gap-1">
+                          {bettingDetail.winning_numbers.map((number, index) => (
+                            <Badge
+                              key={index}
+                              variant="secondary"
+                              className={`px-2 py-1 text-xs font-mono ${
+                                bettingDetail.numbers.includes(number)
+                                  ? "bg-green-100 text-green-800 border-green-200"
+                                  : "bg-gray-100 text-gray-600"
+                              }`}
+                            >
+                              {number}
+                            </Badge>
+                          ))}
+                        </div>
+                        <div className="mt-2 text-xs text-gray-600">
+                          <span className="inline-flex items-center">
+                            <div className="w-2 h-2 bg-green-100 border border-green-200 rounded mr-1"></div>
+                            Số bạn đã cược
+                          </span>
+                          <span className="inline-flex items-center ml-4">
+                            <div className="w-2 h-2 bg-gray-100 border border-gray-200 rounded mr-1"></div>
+                            Số khác
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Timing Information */}
+                  <div className="bg-purple-50 p-4 rounded-lg">
+                    <h4 className="text-sm font-semibold text-purple-900 mb-3 flex items-center">
+                      <Clock className="w-4 h-4 mr-2" />
+                      Thời gian
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <label className="text-xs font-medium text-purple-700">Đặt cược</label>
+                        <p className="text-purple-900">{formatDate(bettingDetail.created_at)}</p>
+                      </div>
+                      {bettingDetail.processed_at && (
+                        <div>
+                          <label className="text-xs font-medium text-purple-700">Xử lý kết quả</label>
+                          <p className="text-purple-900">{formatDate(bettingDetail.processed_at)}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : selectedTransaction.game_bet_id ? (
+                <div className="border-t pt-6">
+                  <p className="text-sm text-gray-500 text-center py-4">
+                    Không tìm thấy chi tiết cược cho giao dịch này.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

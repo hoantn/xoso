@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
-import { Loader2, Play, RefreshCw, Clock, CheckCircle, Plus, Timer, Award } from "lucide-react"
+import { Loader2, Play, RefreshCw, Clock, CheckCircle, Plus, Timer, Award, Trophy, Target } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
@@ -31,14 +31,18 @@ interface ActiveSession {
 
 interface DrawResult {
   success: boolean
-  session: any
-  bet_processing_summary: {
+  session: {
+    id: string
+    session_number: number
+    winning_numbers: string[]
+    results: any
+  }
+  processing_result: {
     success: boolean
-    message: string
-    processed: number
+    processed_bets: number
     winners: number
-    totalWinAmount: number
-    errors: string[] | null
+    total_payout: number
+    winning_numbers: string[]
   }
   message: string
 }
@@ -97,7 +101,6 @@ export function LotteryDrawManager({ token }: LotteryDrawManagerProps) {
 
       if (!response.ok) {
         const errorText = await response.text()
-        // This checks if the error is an HTML page or a JSON error
         if (errorText.trim().startsWith("<!DOCTYPE html>")) {
           throw new Error(
             `Server returned an HTML error page (Status: ${response.status}). The API route might be missing or broken.`,
@@ -260,7 +263,7 @@ export function LotteryDrawManager({ token }: LotteryDrawManagerProps) {
 
       toast({
         title: "Quay số thành công!",
-        description: `Phiên #${result.session.session_number}: ${result.bet_processing_summary?.message || result.message}`,
+        description: `Phiên #${result.session.session_number}: Xử lý ${result.processing_result?.processed_bets || 0} cược, ${result.processing_result?.winners || 0} người thắng`,
       })
 
       // Refresh both ready sessions and active sessions
@@ -436,7 +439,7 @@ export function LotteryDrawManager({ token }: LotteryDrawManagerProps) {
         </CardContent>
       </Card>
 
-      {/* Last Draw Result */}
+      {/* Last Draw Result - FIXED */}
       {lastDrawResult && (
         <Card>
           <CardHeader>
@@ -448,36 +451,132 @@ export function LotteryDrawManager({ token }: LotteryDrawManagerProps) {
           <CardContent>
             <Alert className="mb-4">
               <CheckCircle className="h-4 w-4" />
-              <AlertDescription>{lastDrawResult.message}</AlertDescription>
+              <AlertDescription>
+                Phiên #{lastDrawResult.session?.session_number}: Quay số thành công và xử lý cược hoàn tất
+              </AlertDescription>
             </Alert>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <h4 className="font-semibold mb-2">Thông tin phiên:</h4>
-                <p>Số phiên: #{lastDrawResult.session?.session_number}</p>
-                <p>Loại game: {formatGameType(lastDrawResult.session?.game_type)}</p>
-                <p>Trạng thái: {lastDrawResult.session?.status}</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Session Info */}
+              <div className="space-y-4">
+                <h4 className="font-semibold mb-3 flex items-center">
+                  <Target className="w-4 h-4 mr-2" />
+                  Thông tin phiên
+                </h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Số phiên:</span>
+                    <span className="font-medium">#{lastDrawResult.session?.session_number}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Trạng thái:</span>
+                    <Badge className="bg-green-100 text-green-800">Hoàn thành</Badge>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Số trúng giải:</span>
+                    <span className="font-medium">{lastDrawResult.session?.winning_numbers?.length || 0} số</span>
+                  </div>
+                </div>
+
+                {/* Winning Numbers Display */}
+                {lastDrawResult.session?.winning_numbers && (
+                  <div>
+                    <h5 className="font-medium mb-2 text-sm text-gray-700">Danh sách số trúng giải:</h5>
+                    <div className="flex flex-wrap gap-1">
+                      {lastDrawResult.session.winning_numbers.slice(0, 10).map((number, index) => (
+                        <Badge key={index} variant="outline" className="text-xs font-mono">
+                          {number}
+                        </Badge>
+                      ))}
+                      {lastDrawResult.session.winning_numbers.length > 10 && (
+                        <Badge variant="outline" className="text-xs">
+                          +{lastDrawResult.session.winning_numbers.length - 10} số khác
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div>
-                <h4 className="font-semibold mb-2">Xử lý cược:</h4>
-                <p>Kết quả: {lastDrawResult.bet_processing_summary?.success ? "Thành công" : "Lỗi"}</p>
-                <p>Thông báo: {lastDrawResult.bet_processing_summary?.message}</p>
+
+              {/* Processing Results */}
+              <div className="space-y-4">
+                <h4 className="font-semibold mb-3 flex items-center">
+                  <Trophy className="w-4 h-4 mr-2" />
+                  Xử lý cược
+                </h4>
+                <div className="space-y-3">
+                  <div className="bg-blue-50 p-3 rounded-lg">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-blue-700">Tổng cược xử lý:</span>
+                      <span className="font-bold text-blue-900">
+                        {lastDrawResult.processing_result?.processed_bets || 0}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-green-50 p-3 rounded-lg">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-green-700">Số người thắng:</span>
+                      <span className="font-bold text-green-900">{lastDrawResult.processing_result?.winners || 0}</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-purple-50 p-3 rounded-lg">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-purple-700">Tổng tiền thưởng:</span>
+                      <span className="font-bold text-purple-900">
+                        {(lastDrawResult.processing_result?.total_payout || 0).toLocaleString()}đ
+                      </span>
+                    </div>
+                  </div>
+
+                  {lastDrawResult.processing_result?.winners > 0 && (
+                    <div className="bg-yellow-50 p-3 rounded-lg">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-yellow-700">Tỷ lệ thắng:</span>
+                        <span className="font-bold text-yellow-900">
+                          {(
+                            (lastDrawResult.processing_result.winners /
+                              lastDrawResult.processing_result.processed_bets) *
+                              100 || 0
+                          ).toFixed(1)}
+                          %
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
-            {lastDrawResult.results && (
-              <div className="mt-4">
-                <h4 className="font-semibold mb-2">Kết quả quay:</h4>
-                <div className="grid grid-cols-4 gap-2 text-sm">
-                  <div>
-                    ĐB: <Badge>{lastDrawResult.results.special_prize}</Badge>
+            {/* Special Prize Display */}
+            {lastDrawResult.session?.results && (
+              <div className="mt-6 p-4 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg border border-yellow-200">
+                <h5 className="font-semibold mb-3 text-yellow-800">Kết quả chi tiết:</h5>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div className="text-center">
+                    <div className="text-xs text-gray-600 mb-1">Đặc Biệt</div>
+                    <Badge className="bg-red-100 text-red-800 font-mono">
+                      {lastDrawResult.session.results.special_prize}
+                    </Badge>
                   </div>
-                  <div>
-                    G1: <Badge>{lastDrawResult.results.first_prize}</Badge>
+                  <div className="text-center">
+                    <div className="text-xs text-gray-600 mb-1">Giải Nhất</div>
+                    <Badge className="bg-blue-100 text-blue-800 font-mono">
+                      {lastDrawResult.session.results.first_prize}
+                    </Badge>
                   </div>
-                  <div>
-                    Số trúng:{" "}
-                    <Badge className="bg-red-100 text-red-800">{lastDrawResult.results.winning_numbers?.[0]}</Badge>
+                  <div className="text-center">
+                    <div className="text-xs text-gray-600 mb-1">Lô về</div>
+                    <Badge className="bg-green-100 text-green-800">
+                      {lastDrawResult.session.results.special_prize?.slice(-2)}
+                    </Badge>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-xs text-gray-600 mb-1">Đề về</div>
+                    <Badge className="bg-purple-100 text-purple-800">
+                      {lastDrawResult.session.results.special_prize?.slice(-2)}
+                    </Badge>
                   </div>
                 </div>
               </div>

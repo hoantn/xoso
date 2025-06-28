@@ -1,107 +1,177 @@
-import { NextResponse, type NextRequest } from "next/server"
-import { createClient } from "@supabase/supabase-js"
+import { NextResponse } from "next/server"
+import { supabase } from "@/lib/supabase"
 import { AuthService } from "@/lib/auth"
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!)
-const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-
-export async function POST(request: NextRequest) {
-  try {
-    // Authentication check
-    const authHeader = request.headers.get("Authorization")
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized: Missing token" }, { status: 401 })
-    }
-
+async function getCurrentUser(request: Request) {
+  const authHeader = request.headers.get("Authorization")
+  if (authHeader && authHeader.startsWith("Bearer ")) {
     const token = authHeader.substring(7)
     const user = AuthService.verifySessionToken(token)
+    return user
+  }
+  return null
+}
+
+function createDetailedBettingDescription(
+  betType: string,
+  numbers: string[],
+  points: number,
+  totalCost: number,
+  sessionNumber: string,
+): string {
+  const costPerNumber = points * 29000 // 29,000 VND per point
+  const betTypeDisplay = getBetTypeDisplay(betType)
+  const numbersText = numbers.join(", ")
+
+  return `🎯 ${betTypeDisplay}: ${numbersText} | ${points} điểm/số (${costPerNumber.toLocaleString()}đ/số) | ${numbers.length} số | Tổng: ${totalCost.toLocaleString()}đ | Phiên: ${sessionNumber}`
+}
+
+function getBetTypeDisplay(betType: string): string {
+  const typeMap: { [key: string]: string } = {
+    lo_2_so_1p: "Lô 2 Số 1p",
+    lo_2_so_5p: "Lô 2 Số 5p",
+    lo_2_so_30p: "Lô 2 Số 30p",
+    lo_3_so_1p: "Lô 3 Số 1p",
+    de_dac_biet_1p: "Đề Đặc Biệt 1p",
+    de_dac_biet_5p: "Đề Đặc Biệt 5p",
+    de_dac_biet_30p: "Đề Đặc Biệt 30p",
+    xien_2_1p: "Xiên 2 - 1p",
+    xien_3_1p: "Xiên 3 - 1p",
+    xien_4_1p: "Xiên 4 - 1p",
+    nhat_to_1p: "Nhất Tố 1p",
+    de_dau_duoi_1p: "Đề Đầu Đuôi 1p",
+  }
+  return typeMap[betType] || betType
+}
+
+export async function POST(request: Request) {
+  try {
+    const user = await getCurrentUser(request)
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized: Invalid token" }, { status: 401 })
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const { sessionId, betType, numbers, amount, points = 0, potentialWin } = await request.json()
+    console.log(`[PLACE_BET_POST] START - User: ${user.username} (ID: ${user.id})`)
 
-    // Validation
-    if (!sessionId || !betType || !numbers || potentialWin === undefined) {
+    const body = await request.json()
+    const { sessionId, betType, numbers, amount, points, potentialWin } = body
+
+    console.log(`[PLACE_BET_POST] Request body:`, { sessionId, betType, numbers, amount, points, potentialWin })
+
+    // Validate input
+    if (!sessionId || !betType || !numbers || !Array.isArray(numbers) || numbers.length === 0) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 
-    if (!Array.isArray(numbers) || numbers.length === 0) {
-      return NextResponse.json({ error: "Numbers must be a non-empty array" }, { status: 400 })
+    // Validate numbers format
+    for (const num of numbers) {
+      if (!/^\d+$/.test(num)) {
+        return NextResponse.json({ error: `Invalid number format: ${num}` }, { status: 400 })
+      }
     }
 
-    // Determine if this is a point-based bet (Lô) or money-based bet (Đề/Xiên)
+    // For point-based bets, validate points
     const isPointBased = betType.includes("lo") && !betType.includes("de")
-
-    let finalAmount = amount
-    let finalPoints = points
-    let actualCost = 0
-
-    if (isPointBased) {
-      // For point-based betting (Lô), calculate total cost
-      if (!points || points <= 0) {
-        return NextResponse.json({ error: "Points required for Lô betting" }, { status: 400 })
-      }
-      // Cost = points × number_of_selected_numbers × 29,000 VND per point
-      actualCost = points * numbers.length * 29000
-      finalAmount = actualCost // Store the actual cost in amount field
-      finalPoints = points
-    } else {
-      // For money-based betting (Đề/Xiên)
-      if (!amount || amount <= 0) {
-        return NextResponse.json({ error: "Amount required for Đề/Xiên betting" }, { status: 400 })
-      }
-      actualCost = amount
-      finalAmount = amount
-      finalPoints = 0
+    if (isPointBased && (!points || points <= 0)) {
+      return NextResponse.json({ error: "Points required for point-based bets" }, { status: 400 })
     }
 
-    console.log(`[PLACE_BET] User ${user.id} placing bet:`, {
-      sessionId,
-      betType,
-      numbers,
-      finalAmount,
-      finalPoints,
-      actualCost,
-      isPointBased,
-    })
+    // For amount-based bets, validate amount
+    if (!isPointBased && (!amount || amount <= 0)) {
+      return NextResponse.json({ error: "Amount required for amount-based bets" }, { status: 400 })
+    }
 
-    // Check if session is open for betting
-    const { data: session, error: sessionError } = await supabaseAdmin
+    // Get session info
+    const { data: session, error: sessionError } = await supabase
       .from("game_sessions")
       .select("*")
       .eq("id", sessionId)
       .single()
 
     if (sessionError || !session) {
-      console.error("[PLACE_BET] Session not found:", sessionError)
+      console.error("[PLACE_BET_POST] Session error:", sessionError)
       return NextResponse.json({ error: "Session not found" }, { status: 404 })
     }
 
+    // Check if session is still open for betting
     if (session.status !== "open") {
       return NextResponse.json({ error: "Session is not open for betting" }, { status: 400 })
     }
 
-    // Check if betting is still allowed (before end time)
+    // Check betting deadline (25 minutes after session start)
     const now = new Date()
-    const endTime = new Date(session.end_time)
-    if (now >= endTime) {
-      return NextResponse.json({ error: "Betting time has ended for this session" }, { status: 400 })
+    const sessionStart = new Date(session.start_time)
+    const bettingDeadline = new Date(sessionStart.getTime() + 25 * 60 * 1000)
+
+    if (now > bettingDeadline) {
+      return NextResponse.json({ error: "Betting time has expired for this session" }, { status: 400 })
     }
 
-    // Use the database function to place the bet
-    const { data: result, error: betError } = await supabaseAdmin.rpc("place_bet_transaction_with_points", {
+    // Calculate total cost
+    let totalCost: number
+    if (isPointBased) {
+      totalCost = points * 29000 * numbers.length // 29,000 VND per point per number
+    } else {
+      totalCost = amount
+    }
+
+    if (totalCost <= 0) {
+      return NextResponse.json({ error: "Invalid bet amount" }, { status: 400 })
+    }
+
+    // Check user balance
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("balance")
+      .eq("id", user.id)
+      .single()
+
+    if (userError || !userData) {
+      console.error("[PLACE_BET_POST] User error:", userError)
+      return NextResponse.json({ error: "User not found" }, { status: 404 })
+    }
+
+    if (userData.balance < totalCost) {
+      return NextResponse.json(
+        {
+          error: "Insufficient balance",
+          required: totalCost,
+          available: userData.balance,
+        },
+        { status: 400 },
+      )
+    }
+
+    // Create detailed description
+    const detailedDescription = isPointBased
+      ? createDetailedBettingDescription(betType, numbers, points, totalCost, session.session_number)
+      : `🎯 ${getBetTypeDisplay(betType)}: ${numbers.join(", ")} | ${totalCost.toLocaleString()}đ | Phiên: ${session.session_number}`
+
+    console.log(`[PLACE_BET_POST] Calling place_bet_with_transaction with:`, {
       p_user_id: user.id,
       p_session_id: sessionId,
       p_bet_type: betType,
       p_numbers: numbers,
-      p_amount: finalAmount,
-      p_points: finalPoints,
-      p_potential_win: potentialWin, // 🆕 gửi xuống DB
+      p_points: isPointBased ? points : null,
+      p_amount: totalCost,
+      p_potential_win: potentialWin || 0,
+      p_description: detailedDescription,
+    })
+
+    // Call the database function
+    const { data: result, error: betError } = await supabase.rpc("place_bet_with_transaction", {
+      p_user_id: user.id,
+      p_session_id: sessionId,
+      p_bet_type: betType,
+      p_numbers: numbers,
+      p_points: isPointBased ? points : null,
+      p_amount: totalCost,
+      p_potential_win: potentialWin || 0,
+      p_description: detailedDescription,
     })
 
     if (betError) {
-      console.error("[PLACE_BET] Database error:", betError)
+      console.error("[PLACE_BET_POST] Database error:", betError)
       return NextResponse.json(
         {
           error: "Failed to place bet",
@@ -111,85 +181,22 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log(`[PLACE_BET] Bet placed successfully:`, result)
+    console.log(`[PLACE_BET_POST] SUCCESS - Bet placed: ${result}`)
 
     return NextResponse.json({
       success: true,
-      message: isPointBased
-        ? `Đặt cược thành công: ${finalPoints} điểm (${actualCost.toLocaleString()}đ)`
-        : `Đặt cược thành công: ${finalAmount.toLocaleString()}đ`,
-      bet: result,
-      cost_breakdown: {
-        is_point_based: isPointBased,
-        points: finalPoints,
-        cost_per_point: isPointBased ? 29000 : 0,
-        total_cost: actualCost,
-        numbers_count: numbers.length,
-      },
-      session: {
-        id: session.id,
-        session_number: session.session_number,
-        end_time: session.end_time,
-      },
+      message: "Bet placed successfully",
+      betId: result,
+      totalCost,
+      description: detailedDescription,
     })
-  } catch (error: any) {
-    console.error("[PLACE_BET] Unexpected error:", error)
+  } catch (error) {
+    console.error(`[PLACE_BET_POST] CATCH ERROR:`, error)
     return NextResponse.json(
       {
+        success: false,
         error: "Internal server error",
-        details: error.message,
-      },
-      { status: 500 },
-    )
-  }
-}
-
-export async function GET(request: NextRequest) {
-  try {
-    // Authentication check
-    const authHeader = request.headers.get("Authorization")
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized: Missing token" }, { status: 401 })
-    }
-
-    const token = authHeader.substring(7)
-    const user = AuthService.verifySessionToken(token)
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized: Invalid token" }, { status: 401 })
-    }
-
-    // Get user's recent bets
-    const { data: bets, error } = await supabase
-      .from("user_bets")
-      .select(`
-        *,
-        game_sessions (
-          session_number,
-          game_mode,
-          status,
-          start_time,
-          end_time
-        )
-      `)
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(20)
-
-    if (error) {
-      console.error("[GET_BETS] Database error:", error)
-      return NextResponse.json({ error: "Failed to fetch bets" }, { status: 500 })
-    }
-
-    return NextResponse.json({
-      success: true,
-      bets: bets || [],
-    })
-  } catch (error: any) {
-    console.error("[GET_BETS] Unexpected error:", error)
-    return NextResponse.json(
-      {
-        error: "Internal server error",
-        details: error.message,
+        details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 },
     )
