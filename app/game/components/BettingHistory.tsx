@@ -17,9 +17,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Hash,
+  Star,
   Calculator,
   DollarSign,
-  Clock,
 } from "lucide-react"
 
 interface BettingTransaction {
@@ -242,18 +242,12 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
       xien: "Xiên",
       lo_2_so_30p: "Lô 2 Số 30p",
       lo_2_so_1p: "Lô 2 Số 1p",
-      lo_2_so_5p: "Lô 2 Số 5p",
-      de_dac_biet_1p: "Đề Đặc Biệt 1p",
-      de_dac_biet_5p: "Đề Đặc Biệt 5p",
-      de_dac_biet_30p: "Đề Đặc Biệt 30p",
-      xien_2_1p: "Xiên 2 - 1p",
-      xien_3_1p: "Xiên 3 - 1p",
-      xien_4_1p: "Xiên 4 - 1p",
     }
     return typeMap[betType] || betType
   }
 
   const parseDetailedDescription = (description: string) => {
+    // Parse the detailed description to extract betting information
     console.log("[BettingHistory] Parsing description:", description)
 
     const result: any = {}
@@ -264,7 +258,7 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
     }
 
     // Extract numbers from the beginning of description
-    const numbersMatch = description.match(/🎯\s*[^:]+:\s*([0-9, ]+)/u)
+    const numbersMatch = description.match(/[🎯💰]\s*[^:]+:\s*([0-9, ]+)/u)
     if (numbersMatch) {
       result.numbers = numbersMatch[1].split(", ").map((n) => n.trim())
     }
@@ -278,6 +272,13 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
       if (pointsCostMatch) {
         result.pointsPerNumber = Number.parseInt(pointsCostMatch[1])
         result.costPerNumber = pointsCostMatch[2]
+      }
+
+      // Alternative pattern: "10 điểm/số $$290.000đ/số$$"
+      const pointsCostMatch2 = part.match(/(\d+)\s*điểm\/số\s*\$\$([^$]+)\/số\$\$/)
+      if (pointsCostMatch2) {
+        result.pointsPerNumber = Number.parseInt(pointsCostMatch2[1])
+        result.costPerNumber = pointsCostMatch2[2]
       }
 
       // Match pattern: "10 số"
@@ -299,6 +300,28 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
       }
     })
 
+    // If we didn't find the points/cost in the standard format, try alternative parsing
+    if (!result.pointsPerNumber || !result.costPerNumber) {
+      // Try to extract from the full description using different patterns
+      const altPointsMatch = description.match(/(\d+)\s*điểm/)
+      if (altPointsMatch) {
+        result.pointsPerNumber = Number.parseInt(altPointsMatch[1])
+      }
+
+      // Try to extract cost from currency patterns
+      const altCostMatch = description.match(/([0-9.,]+đ)/)
+      if (altCostMatch && !result.totalCost) {
+        result.totalCost = altCostMatch[1]
+      }
+
+      // If we have total cost and number count, calculate cost per number
+      if (result.totalCost && result.numbersCount && !result.costPerNumber) {
+        const totalAmount = Number.parseFloat(result.totalCost.replace(/[.,]/g, "").replace("đ", ""))
+        const costPerNum = totalAmount / result.numbersCount
+        result.costPerNumber = costPerNum.toLocaleString("vi-VN") + "đ"
+      }
+    }
+
     // Calculate total points if we have the data
     if (result.pointsPerNumber && result.numbersCount) {
       result.totalPoints = result.pointsPerNumber * result.numbersCount
@@ -306,6 +329,7 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
 
     // If we still don't have points per number, try to infer from common patterns
     if (!result.pointsPerNumber && result.numbersCount) {
+      // Common betting patterns - assume 10 points if not specified
       result.pointsPerNumber = 10
       result.totalPoints = result.pointsPerNumber * result.numbersCount
     }
@@ -316,7 +340,7 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
 
   const parseWinningDescription = (description: string) => {
     // Parse winning transaction description
-    // Format: 🏆 Thắng cược Lô 2 Số: Số trúng [76 (2 lần), 05 (1 lần)] | 10 điểm/số | Tổng 3 lần trúng | Phiên 1388 | Thưởng: 2.970.000đ
+    // Format: 🏆 Thắng cược Lô 2 Số 1 Phút: Số trúng [72 (1 lần)] | 10 điểm/số | Tổng 1 lần trúng | Phiên 1474 | Thưởng: 990.000đ
 
     const result: any = { isWinning: true }
 
@@ -326,14 +350,14 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
       result.betType = betTypeMatch[1].trim()
     }
 
-    // Extract winning numbers with hit counts - FIXED REGEX
+    // Extract winning numbers with hit counts - improved regex
     const winningNumbersMatch = description.match(/Số trúng \[([^\]]+)\]/)
     if (winningNumbersMatch) {
       const winningNumbersStr = winningNumbersMatch[1]
       result.winningNumbers = []
       result.hitCounts = {}
 
-      // Parse individual winning numbers: "76 (2 lần), 05 (1 lần)"
+      // Parse individual winning numbers: "72 (1 lần)" or "76 (2 lần), 05 (1 lần)"
       const numberMatches = winningNumbersStr.match(/(\d+)\s*$$(\d+)\s*lần$$/g)
       if (numberMatches) {
         numberMatches.forEach((match) => {
@@ -346,15 +370,10 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
       }
     }
 
-    // Extract points per number or amount per number
+    // Extract points per number
     const pointsMatch = description.match(/(\d+)\s*điểm\/số/)
     if (pointsMatch) {
       result.pointsPerNumber = Number.parseInt(pointsMatch[1])
-    }
-
-    const amountMatch = description.match(/([0-9.,]+đ)\/số/)
-    if (amountMatch) {
-      result.amountPerNumber = amountMatch[1]
     }
 
     // Extract total hits
@@ -369,10 +388,10 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
       result.sessionNumber = sessionMatch[1].trim()
     }
 
-    // Extract total winnings
-    const winningsMatch = description.match(/Thưởng:\s*([0-9.,]+đ)/)
+    // Extract total winnings - improved regex to handle different formats
+    const winningsMatch = description.match(/Thưởng:\s*([0-9.,]+)đ/)
     if (winningsMatch) {
-      result.totalWinnings = winningsMatch[1]
+      result.totalWinnings = winningsMatch[1] + "đ"
     }
 
     return result
@@ -483,11 +502,11 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
                               <div className="mt-2 p-3 bg-green-50 rounded-lg border border-green-200">
                                 <div className="flex items-center gap-2 mb-2">
                                   <Trophy className="w-4 h-4 text-green-600" />
-                                  <span className="text-sm font-medium text-green-800">Số đã cược trúng giải</span>
+                                  <span className="text-sm font-medium text-green-800">Chi tiết thắng cược</span>
                                 </div>
                                 <div className="space-y-2">
                                   <div className="flex flex-wrap gap-1">
-                                    <span className="text-xs text-green-700">Số trúng:</span>
+                                    <span className="text-xs text-green-700">Số trúng giải:</span>
                                     {parsedDetails.winningNumbers.map((number: string, index: number) => (
                                       <Badge key={index} className="bg-green-100 text-green-800 text-xs">
                                         {number} ({parsedDetails.hitCounts[number]} lần)
@@ -499,9 +518,7 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
                                     {parsedDetails.pointsPerNumber && (
                                       <span> • {parsedDetails.pointsPerNumber} điểm/số</span>
                                     )}
-                                    {parsedDetails.amountPerNumber && (
-                                      <span> • {parsedDetails.amountPerNumber}/số</span>
-                                    )}
+                                    {parsedDetails.betType && <span> • {parsedDetails.betType}</span>}
                                   </div>
                                   <div className="text-sm font-bold text-green-800">
                                     💰 Thưởng: {parsedDetails.totalWinnings}
@@ -594,7 +611,7 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
         </TabsContent>
       </Tabs>
 
-      {/* Detail Modal - ENHANCED */}
+      {/* Detail Modal */}
       <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -645,244 +662,273 @@ export default function BettingHistory({ token }: BettingHistoryProps) {
                 </div>
               </div>
 
-              {/* Enhanced Betting Details from API */}
+              {/* Enhanced Betting Details */}
+              {(() => {
+                const parsedDetails = parseDetailedDescription(
+                  selectedTransaction.enhanced_description || selectedTransaction.description,
+                )
+
+                return (
+                  (parsedDetails.numbers || parsedDetails.winningNumbers) && (
+                    <div className="border-t pt-6 space-y-6">
+                      <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                        <Hash className="w-5 h-5 mr-2" />
+                        Chi tiết cược
+                      </h3>
+
+                      {/* Winning Details */}
+                      {parsedDetails.isWinning && parsedDetails.winningNumbers && (
+                        <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                          <h4 className="text-sm font-semibold text-green-900 mb-3 flex items-center">
+                            <Trophy className="w-4 h-4 mr-2" />
+                            Chi tiết thắng cược
+                          </h4>
+                          <div className="space-y-4">
+                            <div>
+                              <label className="text-xs font-medium text-green-700 block mb-2">
+                                Số trúng giải ({parsedDetails.winningNumbers.length} số)
+                              </label>
+                              <div className="flex flex-wrap gap-2">
+                                {parsedDetails.winningNumbers.map((number: string, index: number) => (
+                                  <Badge
+                                    key={index}
+                                    className="bg-green-100 text-green-800 px-3 py-1 text-sm font-mono"
+                                  >
+                                    {number} ({parsedDetails.hitCounts[number]} lần)
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="text-xs font-medium text-green-700">Loại cược</label>
+                                <p className="text-sm font-bold text-green-900">{parsedDetails.betType}</p>
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-green-700">Tổng lần trúng</label>
+                                <p className="text-sm font-bold text-green-900">{parsedDetails.totalHits} lần</p>
+                              </div>
+                              {parsedDetails.pointsPerNumber && (
+                                <div>
+                                  <label className="text-xs font-medium text-green-700">Điểm/số</label>
+                                  <p className="text-sm font-bold text-green-900">
+                                    {parsedDetails.pointsPerNumber} điểm
+                                  </p>
+                                </div>
+                              )}
+                              {parsedDetails.amountPerNumber && (
+                                <div>
+                                  <label className="text-xs font-medium text-green-700">Tiền/số</label>
+                                  <p className="text-sm font-bold text-green-900">{parsedDetails.amountPerNumber}</p>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="pt-3 border-t border-green-200">
+                              <div className="flex justify-between items-center">
+                                <span className="text-sm font-medium text-green-700">Tổng tiền thắng:</span>
+                                <span className="text-xl font-bold text-green-600">{parsedDetails.totalWinnings}</span>
+                              </div>
+                            </div>
+
+                            {parsedDetails.sessionNumber && (
+                              <div className="pt-2 border-t border-green-200">
+                                <label className="text-xs font-medium text-green-700">Phiên cược</label>
+                                <p className="text-sm font-bold text-green-900">{parsedDetails.sessionNumber}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Betting Summary for non-winning transactions */}
+                      {!parsedDetails.isWinning && parsedDetails.numbers && (
+                        <div className="bg-blue-50 p-4 rounded-lg">
+                          <h4 className="text-sm font-semibold text-blue-900 mb-3 flex items-center">
+                            <Calculator className="w-4 h-4 mr-2" />
+                            Tổng quan cược
+                          </h4>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="text-xs font-medium text-blue-700">Số lượng số cược</label>
+                              <p className="text-lg font-bold text-blue-900">{parsedDetails.numbersCount || 0} số</p>
+                            </div>
+                            <div>
+                              <label className="text-xs font-medium text-blue-700">Điểm cược/số</label>
+                              <p className="text-lg font-bold text-blue-900">
+                                {parsedDetails.pointsPerNumber || "?"} điểm
+                              </p>
+                            </div>
+                            <div>
+                              <label className="text-xs font-medium text-blue-700">Chi phí/số</label>
+                              <p className="text-lg font-bold text-blue-900">{parsedDetails.costPerNumber || "N/A"}</p>
+                            </div>
+                            <div>
+                              <label className="text-xs font-medium text-blue-700">Điểm cược tổng</label>
+                              <p className="text-lg font-bold text-blue-900">{parsedDetails.totalPoints || "?"} điểm</p>
+                            </div>
+                          </div>
+                          <div className="mt-4 pt-3 border-t border-blue-200">
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm font-medium text-blue-700">Tổng tiền cược:</span>
+                              <span className="text-xl font-bold text-blue-900">
+                                {parsedDetails.totalCost || "N/A"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Betting Numbers for non-winning transactions */}
+                      {!parsedDetails.isWinning && parsedDetails.numbers && (
+                        <div>
+                          <label className="text-sm font-medium text-gray-700 mb-3 block flex items-center">
+                            <Hash className="w-4 h-4 mr-1" />
+                            Danh sách số đã cược ({parsedDetails.numbersCount} số)
+                          </label>
+                          <div className="bg-gray-50 p-4 rounded-lg">
+                            <div className="flex flex-wrap gap-2">
+                              {parsedDetails.numbers.map((number: string, index: number) => (
+                                <Badge
+                                  key={index}
+                                  variant="outline"
+                                  className="px-3 py-2 text-sm font-mono bg-white text-gray-700 border-gray-300"
+                                >
+                                  {number}
+                                </Badge>
+                              ))}
+                            </div>
+                            <div className="mt-3 text-xs text-gray-600 space-y-1">
+                              <div className="flex items-center">
+                                <DollarSign className="w-3 h-3 inline mr-1" />
+                                Mỗi số: {parsedDetails.pointsPerNumber || "?"} điểm ={" "}
+                                {parsedDetails.costPerNumber || "N/A"}
+                              </div>
+                              <div className="flex items-center">
+                                <Calculator className="w-3 h-3 inline mr-1" />
+                                Tổng: {parsedDetails.numbersCount || 0} số × {parsedDetails.pointsPerNumber || "?"} điểm
+                                = {parsedDetails.totalPoints || "?"} điểm
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {parsedDetails.sessionNumber && !parsedDetails.isWinning && (
+                        <div className="bg-purple-50 p-4 rounded-lg">
+                          <label className="text-sm font-medium text-purple-700">Phiên cược</label>
+                          <p className="mt-1 text-lg font-bold text-purple-900">{parsedDetails.sessionNumber}</p>
+                        </div>
+                      )}
+                    </div>
+                  )
+                )
+              })()}
+
+              {/* Detailed Betting Information from API */}
               {detailLoading ? (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="w-6 h-6 animate-spin text-purple-600" />
                   <span className="ml-2 text-sm text-gray-600">Đang tải chi tiết cược...</span>
                 </div>
               ) : bettingDetail ? (
-                <div className="border-t pt-6 space-y-6">
+                <div className="border-t pt-6 space-y-4">
                   <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                    <Hash className="w-5 h-5 mr-2" />
-                    Chi tiết cược
+                    <Star className="w-5 h-5 mr-2" />
+                    Thông tin phiên cược
                   </h3>
 
-                  {/* Betting Summary */}
-                  <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                    <h4 className="text-sm font-semibold text-blue-900 mb-3 flex items-center">
-                      <Calculator className="w-4 h-4 mr-2" />
-                      Thông tin cược
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-medium text-blue-700">Loại cược</label>
-                        <p className="text-sm font-bold text-blue-900">{getBetTypeDisplay(bettingDetail.bet_type)}</p>
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-blue-700">Phiên cược</label>
-                        <p className="text-sm font-bold text-blue-900">#{bettingDetail.session_number}</p>
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-blue-700">Số lượng số</label>
-                        <p className="text-sm font-bold text-blue-900">{bettingDetail.numbers.length} số</p>
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-blue-700">Trạng thái</label>
-                        <Badge
-                          className={
-                            bettingDetail.status === "won"
-                              ? "bg-green-100 text-green-800"
-                              : bettingDetail.status === "lost"
-                                ? "bg-red-100 text-red-800"
-                                : "bg-yellow-100 text-yellow-800"
-                          }
-                        >
-                          {bettingDetail.status === "won"
-                            ? "Thắng"
-                            : bettingDetail.status === "lost"
-                              ? "Thua"
-                              : "Đang chờ"}
-                        </Badge>
-                      </div>
-                      {bettingDetail.points > 0 && (
-                        <div>
-                          <label className="text-xs font-medium text-blue-700">Điểm cược</label>
-                          <p className="text-sm font-bold text-blue-900">{bettingDetail.points} điểm/số</p>
-                        </div>
-                      )}
-                      <div>
-                        <label className="text-xs font-medium text-blue-700">Tiền cược</label>
-                        <p className="text-sm font-bold text-blue-900">{formatCurrency(bettingDetail.bet_amount)}đ</p>
-                      </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">Phiên</label>
+                      <p className="mt-1 text-sm text-gray-900">{bettingDetail.session_number}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">Loại cược</label>
+                      <p className="mt-1 text-sm text-gray-900">{getBetTypeDisplay(bettingDetail.bet_type)}</p>
                     </div>
                   </div>
 
-                  {/* Numbers Bet */}
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 mb-3 block flex items-center">
-                      <Hash className="w-4 h-4 mr-1" />
-                      Số đã cược ({bettingDetail.numbers.length} số)
-                    </label>
-                    <div className="bg-gray-50 p-4 rounded-lg">
-                      <div className="flex flex-wrap gap-2">
-                        {bettingDetail.numbers.map((number: string, index: number) => (
-                          <Badge
-                            key={index}
-                            variant="outline"
-                            className={`px-3 py-2 text-sm font-mono ${
-                              Object.keys(bettingDetail.hit_count).includes(number)
-                                ? "bg-green-100 text-green-800 border-green-300"
-                                : "bg-white text-gray-700 border-gray-300"
-                            }`}
-                          >
-                            {number}
-                            {Object.keys(bettingDetail.hit_count).includes(number) && (
-                              <span className="ml-1 text-xs">✓</span>
-                            )}
-                          </Badge>
-                        ))}
-                      </div>
-                      <div className="mt-3 text-xs text-gray-600 space-y-1">
-                        <div className="flex items-center">
-                          <DollarSign className="w-3 h-3 inline mr-1" />
-                          {bettingDetail.points > 0
-                            ? `Mỗi số: ${bettingDetail.points} điểm = ${formatCurrency(bettingDetail.points * 29000)}đ`
-                            : `Tổng tiền cược: ${formatCurrency(bettingDetail.bet_amount)}đ`}
-                        </div>
-                        <div className="flex items-center">
-                          <Calculator className="w-3 h-3 inline mr-1" />
-                          Tiềm năng thắng: {formatCurrency(bettingDetail.potential_win)}đ
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Winning Details for Won Bets */}
-                  {selectedTransaction.is_win && Object.keys(bettingDetail.hit_count).length > 0 && (
-                    <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                      <h4 className="text-sm font-semibold text-green-900 mb-3 flex items-center">
-                        <Trophy className="w-4 h-4 mr-2" />
-                        Chi tiết thắng cược
-                      </h4>
-                      <div className="space-y-3">
-                        <div>
-                          <label className="text-xs font-medium text-green-700 block mb-2">
-                            Số trúng giải ({Object.keys(bettingDetail.hit_count).length} số)
-                          </label>
-                          <div className="flex flex-wrap gap-2">
-                            {Object.entries(bettingDetail.hit_count).map(([number, count]) => (
-                              <div key={number} className="bg-green-100 p-2 rounded border border-green-200">
-                                <div className="flex items-center justify-between">
-                                  <Badge className="bg-green-200 text-green-800 mr-2 px-2 py-1 text-sm font-mono">
-                                    {number}
-                                  </Badge>
-                                  <span className="text-sm font-bold text-green-800">{count} lần</span>
-                                </div>
+                  {/* Winning Numbers and Hits (for win transactions) */}
+                  {selectedTransaction.is_win &&
+                    bettingDetail.hit_count &&
+                    Object.keys(bettingDetail.hit_count).length > 0 && (
+                      <div>
+                        <label className="text-sm font-medium text-gray-700 mb-3 block flex items-center">
+                          <Star className="w-4 h-4 mr-1" />
+                          Số trúng giải ({Object.keys(bettingDetail.hit_count).length} số)
+                        </label>
+                        <div className="space-y-3">
+                          {Object.entries(bettingDetail.hit_count).map(([number, count]) => (
+                            <div key={number} className="flex items-center justify-between bg-green-50 p-4 rounded-lg">
+                              <div className="flex items-center">
+                                <Badge className="bg-green-100 text-green-800 mr-3 px-3 py-1 text-sm font-mono">
+                                  {number}
+                                </Badge>
+                                <span className="text-sm text-gray-700">Trúng trong kết quả</span>
                               </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="text-xs font-medium text-green-700">Tổng lần trúng</label>
-                            <p className="text-lg font-bold text-green-900">
-                              {Object.values(bettingDetail.hit_count).reduce(
-                                (sum: number, count: number) => sum + count,
-                                0,
-                              )}{" "}
-                              lần
-                            </p>
-                          </div>
-                          <div>
-                            <label className="text-xs font-medium text-green-700">Tiền thắng</label>
-                            <p className="text-lg font-bold text-green-900">
-                              +{formatCurrency(bettingDetail.actual_win || 0)}đ
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Win Calculation Breakdown */}
-                        <div className="bg-green-100 p-3 rounded border border-green-200">
-                          <h5 className="text-xs font-semibold text-green-800 mb-2">Công thức tính thưởng:</h5>
-                          <div className="text-xs text-green-700 space-y-1">
-                            {bettingDetail.points > 0 ? (
-                              <div>
-                                <div>
-                                  • {bettingDetail.points} điểm/số × 99 (tỷ lệ) ×{" "}
-                                  {Object.values(bettingDetail.hit_count).reduce(
-                                    (sum: number, count: number) => sum + count,
-                                    0,
-                                  )}{" "}
-                                  lần × 1000
-                                </div>
-                                <div className="font-bold">= {formatCurrency(bettingDetail.actual_win || 0)}đ</div>
+                              <div className="flex items-center">
+                                <span className="text-xl font-bold text-green-600 mr-1">{count}</span>
+                                <span className="text-sm text-gray-600">lần</span>
                               </div>
-                            ) : (
-                              <div>
-                                <div>
-                                  • {formatCurrency(bettingDetail.bet_amount)}đ × 99 (tỷ lệ) ×{" "}
-                                  {Object.values(bettingDetail.hit_count).reduce(
-                                    (sum: number, count: number) => sum + count,
-                                    0,
-                                  )}{" "}
-                                  lần
-                                </div>
-                                <div className="font-bold">= {formatCurrency(bettingDetail.actual_win || 0)}đ</div>
+                            </div>
+                          ))}
+
+                          {bettingDetail.actual_win && (
+                            <div className="bg-green-100 p-4 rounded-lg border border-green-200">
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium text-green-800">Tổng tiền thắng:</span>
+                                <span className="text-xl font-bold text-green-600">
+                                  +{formatCurrency(bettingDetail.actual_win)}đ
+                                </span>
                               </div>
-                            )}
-                          </div>
+                            </div>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Session Results */}
+                  {/* All Session Results with distinction */}
                   {bettingDetail.winning_numbers && bettingDetail.winning_numbers.length > 0 && (
                     <div>
                       <label className="text-sm font-medium text-gray-700 mb-3 block">
-                        Kết quả phiên #{bettingDetail.session_number} ({bettingDetail.winning_numbers.length} số)
+                        Kết quả phiên ({bettingDetail.winning_numbers.length} số)
                       </label>
                       <div className="bg-gray-50 p-4 rounded-lg">
                         <div className="flex flex-wrap gap-1">
-                          {bettingDetail.winning_numbers.map((number, index) => (
-                            <Badge
-                              key={index}
-                              variant="secondary"
-                              className={`px-2 py-1 text-xs font-mono ${
-                                bettingDetail.numbers.includes(number)
-                                  ? "bg-green-100 text-green-800 border-green-200"
-                                  : "bg-gray-100 text-gray-600"
-                              }`}
-                            >
-                              {number}
-                            </Badge>
-                          ))}
+                          {bettingDetail.winning_numbers.map((number, index) => {
+                            const isWinningNumber = bettingDetail.hit_count && bettingDetail.hit_count[number] > 0
+                            return (
+                              <Badge
+                                key={index}
+                                variant="secondary"
+                                className={`px-2 py-1 text-xs font-mono ${
+                                  isWinningNumber
+                                    ? "bg-green-100 text-green-800 border-green-200 font-bold"
+                                    : "bg-gray-100 text-gray-600"
+                                }`}
+                              >
+                                {number}
+                                {isWinningNumber && <span className="ml-1">✓</span>}
+                              </Badge>
+                            )
+                          })}
                         </div>
                         <div className="mt-2 text-xs text-gray-600">
                           <span className="inline-flex items-center">
                             <div className="w-2 h-2 bg-green-100 border border-green-200 rounded mr-1"></div>
-                            Số bạn đã cược
+                            Số bạn trúng ({Object.keys(bettingDetail.hit_count || {}).length})
                           </span>
                           <span className="inline-flex items-center ml-4">
                             <div className="w-2 h-2 bg-gray-100 border border-gray-200 rounded mr-1"></div>
-                            Số khác
+                            Số khác (
+                            {bettingDetail.winning_numbers.length - Object.keys(bettingDetail.hit_count || {}).length})
                           </span>
                         </div>
                       </div>
                     </div>
                   )}
-
-                  {/* Timing Information */}
-                  <div className="bg-purple-50 p-4 rounded-lg">
-                    <h4 className="text-sm font-semibold text-purple-900 mb-3 flex items-center">
-                      <Clock className="w-4 h-4 mr-2" />
-                      Thời gian
-                    </h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <label className="text-xs font-medium text-purple-700">Đặt cược</label>
-                        <p className="text-purple-900">{formatDate(bettingDetail.created_at)}</p>
-                      </div>
-                      {bettingDetail.processed_at && (
-                        <div>
-                          <label className="text-xs font-medium text-purple-700">Xử lý kết quả</label>
-                          <p className="text-purple-900">{formatDate(bettingDetail.processed_at)}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
                 </div>
               ) : selectedTransaction.game_bet_id ? (
                 <div className="border-t pt-6">
