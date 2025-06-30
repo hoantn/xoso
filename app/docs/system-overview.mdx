@@ -1,0 +1,235 @@
+# Tổng Quan Hệ Thống Telegram Proxy & Game Lô Đề
+
+Tài liệu này cung cấp cái nhìn tổng quan về kiến trúc, các thành phần chính và luồng hoạt động của hệ thống Telegram Proxy và Game Lô Đề.
+
+## 1. Giới Thiệu
+
+Hệ thống này là một ứng dụng web toàn diện được xây dựng trên Next.js App Router, tích hợp với Supabase làm backend cơ sở dữ liệu và xác thực. Nó cung cấp các tính năng chính sau:
+
+*   **Dịch vụ Proxy Telegram:** Cho phép người dùng kết nối Telegram thông qua các proxy MTProto, SOCKS5, HTTP để vượt qua các hạn chế mạng. Bao gồm cả proxy công khai miễn phí và proxy riêng tư có thể mua.
+*   **Hệ thống Tài chính:** Quản lý số dư người dùng, lịch sử giao dịch (nạp tiền, mua proxy, điều chỉnh, hoàn tiền, rút tiền).
+*   **Hệ thống Game Lô Đề:** Một nền tảng game lô đề nhanh với các phiên chơi tự động, đặt cược, xử lý kết quả và trả thưởng.
+*   **Bảng điều khiển Admin:** Cung cấp các công cụ quản lý người dùng, proxy, gói proxy, yêu cầu nạp/rút tiền và theo dõi hiệu suất hệ thống.
+
+## 2. Cấu Trúc Hệ Thống
+
+### 2.1. Kiến Trúc Chung
+
+Hệ thống tuân theo kiến trúc client-server với Next.js App Router, sử dụng cả Server Components và Client Components. Supabase đóng vai trò là cơ sở dữ liệu PostgreSQL và cung cấp các tính năng xác thực, RPC (Remote Procedure Call) cho các hàm database.
+
+*   **Frontend (Client Components):** Xử lý tương tác người dùng, hiển thị dữ liệu, form, modal.
+*   **Backend (API Routes & Server Components):** Xử lý logic nghiệp vụ, tương tác với database, xác thực, và các tác vụ nền.
+*   **Database (Supabase PostgreSQL):** Lưu trữ tất cả dữ liệu hệ thống.
+*   **Cron Jobs (Vercel Cron):** Tự động hóa các tác vụ định kỳ như tạo phiên game mới, quay số và xử lý cược.
+
+### 2.2. Các Module Chính
+
+#### 2.2.1. Hệ Thống Xác Thực (Authentication)
+
+*   **`lib/auth.ts`:** Chứa logic xác thực tùy chỉnh (không dùng NextAuth.js).
+    *   `AuthService`: Xử lý đăng ký, đăng nhập, hash/verify mật khẩu, tạo/xác minh session token (dựa trên Base64 encoding, không phải JWT tiêu chuẩn).
+    *   `AuthUser` interface: Định nghĩa cấu trúc người dùng (id, username, role, fullName, balance).
+    *   `getAuth(request: Request)`: Hàm tiện ích để lấy thông tin người dùng đã xác thực từ `Request` header hoặc cookie.
+*   **API Routes (`app/api/auth/*`):**
+    *   `/api/auth/register`: Đăng ký tài khoản người dùng mới.
+    *   `/api/auth/login`: Đăng nhập và trả về session token.
+    *   `/api/auth/admin-login`: Đăng nhập cho tài khoản admin.
+    *   `/api/auth/create-admin`: Tạo tài khoản admin (chỉ dùng trong phát triển/khởi tạo).
+    *   `/api/auth/verify`: Xác minh token.
+*   **Components:**
+    *   `app/components/AuthForm.tsx`: Form đăng nhập/đăng ký.
+    *   `app/components/AuthModal.tsx`: Modal chứa `AuthForm`.
+    *   `app/components/AuthProvider.tsx`: Context Provider để quản lý trạng thái xác thực người dùng trên client.
+
+#### 2.2.2. Cơ Sở Dữ Liệu (Database Schema)
+
+Các bảng chính trong Supabase PostgreSQL:
+
+*   **`users`**: Lưu trữ thông tin người dùng (id, username, password_hash, role, full_name, balance, is_active, created_at, updated_at).
+*   **`proxies`**: Lưu trữ thông tin các proxy (id, host, port, secret, notes, is_active, user_id (FK to users), visibility, type, max_users, current_users, source, created_at, updated_at).
+*   **`proxy_plans`**: Định nghĩa các gói proxy có thể mua (id, name, description, price, duration_days, max_connections, proxy_type, is_active, created_at, updated_at).
+*   **`proxy_orders`**: Ghi lại các đơn hàng mua proxy của người dùng (id, user_id (FK), plan_id (FK), proxy_id (FK), price, status, expires_at, created_at, updated_at).
+*   **`transactions`**: Ghi lại tất cả các giao dịch tài chính (id, user_id (FK), type, amount, balance_before, balance_after, description, reference_id, status, metadata, created_at, created_by (FK), updated_at).
+    *   `type` có thể là: `deposit`, `proxy_purchase`, `admin_adjustment`, `refund`, `initial_balance`, `withdrawal`, `purchase` (cho game bet).
+*   **`deposit_requests`**: Lưu trữ các yêu cầu nạp tiền của người dùng (id, user_id (FK), amount, transaction_id, status, payment_info_snapshot, admin_notes, created_at, updated_at).
+*   **`withdrawal_requests`**: Lưu trữ các yêu cầu rút tiền của người dùng (id, user_id (FK), amount, transaction_id, status, bank_account_details_snapshot, admin_notes, created_at, updated_at).
+*   **`bank_accounts`**: Lưu trữ thông tin tài khoản ngân hàng của admin để người dùng nạp tiền vào (id, bank_id, bank_name, account_number, account_name, qr_template, is_active, created_at, updated_at).
+*   **`game_sessions`**: Quản lý các phiên game lô đề (id, game_type, session_number, start_time, end_time, status, winning_numbers, results_data, created_at, updated_at).
+*   **`user_bets`**: Lưu trữ các cược của người dùng trong game (id, user_id (FK), session_id (FK), bet_type, numbers, points, amount, potential_win, status, actual_win, created_at, updated_at, processed_at).
+
+#### 2.2.3. Quản Lý Proxy
+
+*   **API Routes:**
+    *   `/api/proxies`: Lấy danh sách proxy công khai hoặc proxy của người dùng (có phân trang, lọc).
+    *   `/api/random-proxy`: Lấy một proxy ngẫu nhiên theo loại (MTProto, SOCKS5).
+    *   `/api/proxy-plans`: Lấy danh sách các gói proxy.
+    *   `/api/proxy-plans/purchase`: Xử lý logic mua gói proxy (gọi RPC `purchase_proxy_plan`).
+    *   `/api/admin/proxies`: Admin quản lý (thêm, sửa, xóa, lấy danh sách) proxy.
+    *   `/api/admin/proxy-plans`: Admin quản lý các gói proxy.
+    *   `/api/admin/webshare/proxies`: Tích hợp với Webshare API để quản lý proxy từ Webshare.
+*   **Components:**
+    *   `app/components/ProxyCard.tsx`: Hiển thị thông tin một proxy, nút copy, QR code.
+    *   `app/components/ProxyForm.tsx`: Form để admin thêm/sửa proxy.
+    *   `app/components/ProxyShop.tsx`: Giao diện cửa hàng để người dùng mua gói proxy.
+    *   `app/components/ProxyInstallGuide.tsx`: Hướng dẫn cài đặt proxy vào Telegram.
+
+#### 2.2.4. Hệ Thống Tài chính (Giao Dịch, Nạp/Rút Tiền)
+
+*   **API Routes:**
+    *   `/api/deposits/request`: Người dùng tạo yêu cầu nạp tiền.
+    *   `/api/withdrawals/request`: Người dùng tạo yêu cầu rút tiền.
+    *   `/api/transactions/my`: Lấy lịch sử giao dịch của người dùng.
+    *   `/api/admin/deposits`: Admin quản lý các yêu cầu nạp tiền.
+    *   `/api/admin/withdrawals`: Admin quản lý các yêu cầu rút tiền.
+    *   `/api/admin/transactions`: Admin xem toàn bộ lịch sử giao dịch hệ thống.
+    *   `/api/admin/bank-accounts`: Admin quản lý các tài khoản ngân hàng nhận tiền.
+*   **Components:**
+    *   `app/components/TransactionHistory.tsx`: Hiển thị lịch sử giao dịch của người dùng.
+    *   `app/components/DepositForm.tsx`: Form yêu cầu nạp tiền.
+    *   `app/components/WithdrawalForm.tsx`: Form yêu cầu rút tiền.
+    *   `app/components/admin/DepositRequestsTable.tsx`: Bảng quản lý yêu cầu nạp tiền cho admin.
+    *   `app/components/admin/WithdrawalRequestsTable.tsx`: Bảng quản lý yêu cầu rút tiền cho admin.
+
+#### 2.2.5. Hệ Thống Game Lô Đề
+
+*   **API Routes:**
+    *   `/api/game/sessions`: Lấy danh sách các phiên game đang hoạt động.
+    *   `/api/game/recent-results`: Lấy kết quả các phiên game gần đây.
+    *   `/api/game/place-bet`: Người dùng đặt cược (gọi RPC `place_bet_with_transaction`).
+    *   `/api/game/betting-history`: Lấy lịch sử cược của người dùng.
+    *   `/api/game/betting-details`: Lấy chi tiết một cược cụ thể.
+    *   `/api/game/create-next-session`: Tạo phiên game mới (dùng cho cron hoặc admin).
+    *   `/api/game/draw-lottery`: Kích hoạt quay số và xử lý cược cho một phiên (dùng cho cron hoặc admin).
+    *   `/api/cron/auto-process-lottery`: Cron job tự động xử lý các phiên game (đóng cược, quay số, trả thưởng).
+*   **Database Functions (RPCs):**
+    *   `place_bet_with_transaction`: Xử lý đặt cược, trừ tiền người dùng và ghi vào bảng `user_bets` và `transactions`.
+    *   `process_lottery_draw`: Xử lý quay số, cập nhật kết quả phiên, và kích hoạt xử lý cược.
+    *   `payout_winner_with_points`: Xử lý từng cược, xác định thắng/thua, cộng tiền thưởng cho người thắng và cập nhật trạng thái cược.
+*   **Components:**
+    *   `app/game/lode-nhanh/page.tsx`: Trang chơi game Lô Đề Nhanh.
+    *   `app/game/components/BetTypeSelector.tsx`, `NumberGrid.tsx`, `DynamicBetAmountInput.tsx`: Các thành phần UI để đặt cược.
+    *   `app/game/components/GameStatusIndicator.tsx`: Hiển thị trạng thái phiên game hiện tại.
+    *   `app/game/components/BettingHistory.tsx`: Hiển thị lịch sử cược của người dùng với chi tiết thắng/thua.
+
+#### 2.2.6. Bảng Điều Khiển Admin
+
+*   **`app/admin95/page.tsx`:** Trang chính của admin dashboard.
+*   **API Routes (`app/api/admin/*`):** Các API riêng biệt cho admin để quản lý toàn bộ hệ thống.
+*   **Components (`app/components/admin/*`):**
+    *   `UserManagementTable.tsx`: Quản lý người dùng (kích hoạt/vô hiệu hóa, xem thông tin).
+    *   `DepositRequestsTable.tsx`, `WithdrawalRequestsTable.tsx`: Duyệt và xử lý yêu cầu nạp/rút tiền.
+    *   `ProxyPlansManager.tsx`: Quản lý các gói proxy.
+    *   `LotteryDrawManager.tsx`: Quản lý các phiên game lô đề, tạo phiên mới, quay số thủ công.
+    *   `AdminTransactionStats.tsx`: Thống kê giao dịch tổng quan.
+
+#### 2.2.7. Các Tiện Ích & Hooks
+
+*   **`lib/supabase.ts`:** Khởi tạo Supabase client.
+*   **`lib/connection-pool.ts`:** Quản lý kết nối Supabase để tối ưu hiệu suất và độ tin cậy.
+*   **`lib/utils.ts`:** Các hàm tiện ích chung (ví dụ: `cn` cho Tailwind CSS).
+*   **`hooks/use-toast.ts`:** Hook để hiển thị thông báo toast.
+*   **`hooks/usePagination.ts`:** Hook quản lý phân trang.
+
+## 3. Luồng Hoạt Động Chính
+
+### 3.1. Đăng Ký & Đăng Nhập Người Dùng
+
+1.  Người dùng truy cập trang chủ hoặc modal xác thực.
+2.  Nhập `username` và `password` (và `full_name` khi đăng ký).
+3.  Request được gửi đến `/api/auth/register` hoặc `/api/auth/login`.
+4.  `AuthService` xử lý:
+    *   **Đăng ký:** Hash mật khẩu, kiểm tra `username` trùng lặp, tạo bản ghi `users` mới với `balance = 0`.
+    *   **Đăng nhập:** Tìm người dùng, verify mật khẩu, tạo session token (Base64 encoded) chứa `id`, `username`, `role`, `fullName`, `balance`.
+5.  Session token được lưu vào `localStorage`.
+6.  `AuthProvider` cập nhật trạng thái người dùng, cho phép truy cập các tính năng yêu cầu xác thực.
+
+### 3.2. Mua Proxy
+
+1.  Người dùng truy cập trang "Cửa hàng Proxy" (`/proxy-shop`).
+2.  Hệ thống tải danh sách `proxy_plans` từ `/api/proxy-plans`.
+3.  Người dùng chọn một gói và nhấn "Mua Ngay".
+4.  Client gửi `POST` request đến `/api/proxy-plans/purchase` với `plan_id`.
+5.  API route xác thực người dùng, kiểm tra số dư.
+6.  Gọi Supabase RPC `purchase_proxy_plan(user_id, plan_id)`:
+    *   Kiểm tra gói và số dư.
+    *   Tìm một `proxy` công khai `is_active` và chưa được gán.
+    *   Tạo bản ghi `proxy_orders` mới.
+    *   Trừ tiền từ `users.balance`.
+    *   Tạo bản ghi `transactions` loại `purchase`.
+7.  API trả về kết quả, hiển thị thông báo thành công/thất bại và chi tiết proxy đã mua.
+
+### 3.3. Nạp Tiền
+
+1.  Người dùng truy cập trang "Nạp tiền".
+2.  Nhập số tiền và gửi yêu cầu.
+3.  Client gửi `POST` request đến `/api/deposits/request`.
+4.  API tạo một `deposit_requests` mới với trạng thái `pending`, ghi lại `payment_info_snapshot` (thông tin tài khoản ngân hàng của admin).
+5.  Admin truy cập bảng điều khiển, xem các `deposit_requests` đang chờ.
+6.  Admin xác nhận giao dịch chuyển khoản thực tế, sau đó cập nhật trạng thái `deposit_requests` thành `completed` (hoặc `failed`/`cancelled`).
+7.  Khi `deposit_requests` được `completed`, một `transaction` loại `deposit` được tạo và `users.balance` được cập nhật.
+
+### 3.4. Rút Tiền
+
+1.  Người dùng truy cập trang "Rút tiền".
+2.  Nhập số tiền và thông tin tài khoản ngân hàng của họ.
+3.  Client gửi `POST` request đến `/api/withdrawals/request`.
+4.  API tạo một `withdrawal_requests` mới với trạng thái `pending`, ghi lại `bank_account_details_snapshot` của người dùng.
+5.  Admin truy cập bảng điều khiển, xem các `withdrawal_requests` đang chờ.
+6.  Admin thực hiện chuyển khoản thủ công cho người dùng, sau đó cập nhật trạng thái `withdrawal_requests` thành `completed` (hoặc `failed`/`cancelled`).
+7.  Khi `withdrawal_requests` được `completed`, một `transaction` loại `withdrawal` được tạo và `users.balance` được trừ.
+
+### 3.5. Chu Kỳ Game Lô Đề
+
+1.  **Tạo Phiên:**
+    *   Cron job (hoặc admin thủ công) gửi request đến `/api/admin/lottery/create-session`.
+    *   API tạo một bản ghi `game_sessions` mới với `status = 'open'`, `start_time`, `end_time` dựa trên loại game (1p, 5p, 30p).
+2.  **Đặt Cược:**
+    *   Người dùng truy cập trang game (`/game/lode-nhanh`).
+    *   Chọn loại cược, số, điểm/số hoặc số tiền.
+    *   Gửi `POST` request đến `/api/game/place-bet`.
+    *   API xác thực người dùng, kiểm tra phiên đang `open`, kiểm tra số dư.
+    *   Gọi Supabase RPC `place_bet_with_transaction`:
+        *   Trừ tiền từ `users.balance`.
+        *   Tạo bản ghi `user_bets` mới với `status = 'pending'`.
+        *   Tạo bản ghi `transactions` loại `purchase` (cho cược).
+3.  **Quay Số & Xử Lý (Cron Job):**
+    *   Cron job định kỳ gửi request đến `/api/cron/auto-process-lottery`.
+    *   API này kiểm tra các `game_sessions` đang hoạt động:
+        *   Nếu `end_time` sắp đến (ví dụ: còn 15-30s), cập nhật `session.status` thành `drawing` (đóng cược).
+        *   Nếu `end_time` đã qua (hoặc còn rất ít thời gian), tạo `winning_numbers` ngẫu nhiên và gọi Supabase RPC `process_lottery_draw`.
+    *   RPC `process_lottery_draw`:
+        *   Cập nhật `game_sessions` với `winning_numbers` và `results_data`.
+        *   Duyệt qua tất cả `user_bets` `pending` cho phiên đó.
+        *   Với mỗi cược, gọi Supabase RPC `payout_winner_with_points`.
+    *   RPC `payout_winner_with_points`:
+        *   Xác định cược thắng/thua dựa trên `bet_type`, `numbers` của người chơi và `winning_numbers` của phiên.
+        *   Nếu thắng: Cộng `actual_win` vào `users.balance`, tạo `transaction` loại `refund` (cho tiền thắng).
+        *   Cập nhật `user_bets.status` thành `completed` và `processed_at`.
+4.  **Hoàn Thành Phiên:**
+    *   Sau khi tất cả cược được xử lý, `session.status` được cập nhật thành `completed`.
+5.  **Xem Lịch Sử:**
+    *   Người dùng có thể xem lịch sử cược của mình tại `/game/lich-su-cuoc` thông qua `/api/game/betting-history` và `/api/game/betting-details`.
+
+## 4. Công Nghệ Sử Dụng
+
+*   **Framework:** Next.js (App Router)
+*   **Ngôn ngữ:** TypeScript
+*   **Styling:** Tailwind CSS, Shadcn/ui
+*   **Database:** Supabase (PostgreSQL)
+*   **Xác thực:** Custom AuthService (không dùng NextAuth.js)
+*   **Icons:** Lucide React
+*   **QR Code Generation:** `qrcode.react`
+*   **Mật khẩu Hashing:** `bcryptjs`
+*   **Cron Jobs:** Vercel Cron (sử dụng API Routes)
+
+## 5. Lưu Ý Quan Trọng
+
+*   **Xác thực tùy chỉnh:** Hệ thống sử dụng một `AuthService` tùy chỉnh để quản lý phiên, không phải NextAuth.js. Token được mã hóa Base64, không phải JWT tiêu chuẩn.
+*   **Quản lý kết nối Database:** `lib/connection-pool.ts` được sử dụng để quản lý các kết nối Supabase, giúp tối ưu hóa và xử lý lỗi kết nối.
+*   **Cron Jobs:** Các tác vụ tự động (tạo phiên, quay số, xử lý cược) được kích hoạt thông qua Vercel Cron Jobs, yêu cầu `CRON_SECRET` để xác thực.
+*   **Dummy Redis:** File `lib/redis.ts` hiện tại là một dummy implementation, có nghĩa là caching bằng Redis đang bị vô hiệu hóa. Nếu cần caching thực tế, cần tích hợp Upstash Redis hoặc giải pháp khác.
+*   **Admin Panel:** Trang admin (`/admin95`) được bảo vệ bằng vai trò `admin` hoặc `super_admin`.
+*   **Placeholder Images:** Sử dụng `/placeholder.svg` cho các hình ảnh placeholder.
+
+Tài liệu này sẽ được cập nhật khi có bất kỳ thay đổi hoặc bổ sung tính năng nào vào hệ thống.
+\`\`\`

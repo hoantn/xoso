@@ -1,12 +1,22 @@
 {
+  "functions": {
+    "app/api/webhooks/event-processor/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/webhooks/draw-lottery/route.ts": {
+      "maxDuration": 30
+    },
+    "app/api/webhooks/process-payout/route.ts": {
+      "maxDuration": 30
+    },
+    "app/api/webhooks/create-next-session/route.ts": {
+      "maxDuration": 15
+    }
+  },
   "crons": [
     {
-      "path": "/api/cron/auto-process-lottery",
+      "path": "/api/webhooks/event-processor",
       "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/cron/auto-draw",
-      "schedule": "*/2 * * * *"
     }
   ]
 }

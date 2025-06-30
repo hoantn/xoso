@@ -17,6 +17,9 @@ import {
   Target,
   Clock,
   Star,
+  Play,
+  Award,
+  Plus,
 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
@@ -58,6 +61,13 @@ export default function TraditionalLotteryPage() {
     TRADITIONAL_LOTTERY_BET_TYPES.find((bt) => bt.id === selectedBetType) || TRADITIONAL_LOTTERY_BET_TYPES[0]
 
   const [timeUntilDraw, setTimeUntilDraw] = useState<number>(0)
+
+  const [isDrawingManual, setIsDrawingManual] = useState(false)
+  const [isProcessingPayout, setIsProcessingPayout] = useState(false)
+  const [isCreatingSession, setIsCreatingSession] = useState(false)
+
+  // Check if user is admin
+  const isAdmin = user?.role === "admin"
 
   // Fetch lottery data from our API
   const fetchLotteryData = useCallback(async () => {
@@ -106,6 +116,50 @@ export default function TraditionalLotteryPage() {
 
     return () => clearInterval(interval)
   }, [fetchLotteryData])
+
+  const handleCreateNewSession = async () => {
+    if (!isAdmin) {
+      toast({
+        title: "Lỗi quyền truy cập",
+        description: "Bạn không có quyền thực hiện thao tác này.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsCreatingSession(true)
+    try {
+      const gameType = "lode_mien_bac"
+      const response = await fetch("/api/admin/lottery/create-session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+        },
+        body: JSON.stringify({ gameType }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Lỗi không xác định khi tạo phiên mới.")
+      }
+
+      const result = await response.json()
+      toast({
+        title: "Tạo phiên thành công!",
+        description: `Đã tạo phiên #${result.session?.session_number} cho Lô Đề Miền Bắc.`,
+      })
+      fetchLotteryData() // Refresh data after creating session
+    } catch (err) {
+      toast({
+        title: "Lỗi tạo phiên mới",
+        description: err instanceof Error ? err.message : "Lỗi không xác định.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsCreatingSession(false)
+    }
+  }
 
   const handleNumbersChange = (numbers: string[]) => {
     setSelectedNumbers(numbers)
@@ -232,6 +286,112 @@ export default function TraditionalLotteryPage() {
     }
   }
 
+  const handleManualDraw = async () => {
+    if (!isAdmin) {
+      toast({
+        title: "Lỗi quyền truy cập",
+        description: "Bạn không có quyền thực hiện thao tác này.",
+        variant: "destructive",
+      })
+      return
+    }
+    if (!currentSession || currentSession.status !== "open") {
+      toast({
+        title: "Lỗi",
+        description: "Phiên không ở trạng thái 'mở' để quay số.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsDrawingManual(true)
+    try {
+      const response = await fetch("/api/game/draw-lottery", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+        },
+        body: JSON.stringify({
+          sessionId: currentSession.id,
+          gameType: "lode_mien_bac",
+          forceManual: true,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Lỗi không xác định khi quay số thủ công.")
+      }
+
+      const result = await response.json()
+      toast({
+        title: "Quay số thành công!",
+        description: `Phiên #${result.session.session_number} đã được quay. ${result.processing_result?.winners || 0} người thắng.`,
+      })
+      fetchLotteryData() // Refresh data after draw
+    } catch (err) {
+      toast({
+        title: "Lỗi quay số thủ công",
+        description: err instanceof Error ? err.message : "Lỗi không xác định.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDrawingManual(false)
+    }
+  }
+
+  const handleProcessPayout = async () => {
+    if (!isAdmin) {
+      toast({
+        title: "Lỗi quyền truy cập",
+        description: "Bạn không có quyền thực hiện thao tác này.",
+        variant: "destructive",
+      })
+      return
+    }
+    if (!currentSession || currentSession.status !== "completed" || !currentSession.winning_numbers) {
+      toast({
+        title: "Lỗi",
+        description: "Phiên không ở trạng thái 'hoàn thành' hoặc chưa có kết quả để trả thưởng.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsProcessingPayout(true)
+    try {
+      const response = await fetch("/api/admin/lottery/process-payout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+        },
+        body: JSON.stringify({ sessionId: currentSession.id }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Lỗi không xác định khi xử lý trả thưởng.")
+      }
+
+      const result = await response.json()
+      toast({
+        title: "Xử lý trả thưởng thành công!",
+        description: `Đã xử lý ${result.processed_bets} cược, ${result.winners} người thắng, tổng thưởng ${result.total_payout.toLocaleString("vi-VN")}đ.`,
+      })
+      fetchLotteryData() // Refresh data after payout
+    } catch (err) {
+      toast({
+        title: "Lỗi xử lý trả thưởng",
+        description: err instanceof Error ? err.message : "Lỗi không xác định.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsProcessingPayout(false)
+    }
+  }
+
   return (
     <div className="p-4 space-y-4">
       {/* Game Header */}
@@ -247,6 +407,7 @@ export default function TraditionalLotteryPage() {
                   <Star className="w-3 h-3 mr-1" />
                   Chính thức
                 </Badge>
+                {isAdmin && <Badge className="bg-yellow-500 text-black font-bold">ADMIN</Badge>}
               </div>
               <p className="text-blue-100">Theo kết quả XSMB chính thức - Quay số 18:15 hàng ngày</p>
             </div>
@@ -289,7 +450,7 @@ export default function TraditionalLotteryPage() {
                   <p className="text-lg font-semibold text-gray-700">Quay số lúc 18:15</p>
                 </div>
                 <Badge
-                  className={`text-lg px-4 py-2 ${
+                  className={`text-lg px-4 py-2 mb-4 ${
                     currentSession?.status === "open"
                       ? "bg-green-500 text-white"
                       : currentSession?.status === "drawing"
@@ -303,6 +464,60 @@ export default function TraditionalLotteryPage() {
                       ? "Đang quay số"
                       : "Đã có kết quả"}
                 </Badge>
+
+                {/* Admin Controls */}
+                {isAdmin && (
+                  <div className="mt-4 space-y-2">
+                    {/* Create New Session Button - Always visible for admin */}
+                    <Button
+                      onClick={handleCreateNewSession}
+                      disabled={isCreatingSession}
+                      variant="outline"
+                      className="w-full bg-green-500 text-white hover:bg-green-600 border-green-500"
+                    >
+                      {isCreatingSession ? (
+                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      ) : (
+                        <Plus className="w-4 h-4 mr-2" />
+                      )}
+                      Tạo phiên mới
+                    </Button>
+
+                    {/* Manual Draw Button - Show when session is open */}
+                    {currentSession && currentSession.status === "open" && (
+                      <Button
+                        onClick={handleManualDraw}
+                        disabled={isDrawingManual}
+                        variant="outline"
+                        className="w-full bg-blue-500 text-white hover:bg-blue-600 border-blue-500"
+                      >
+                        {isDrawingManual ? (
+                          <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        ) : (
+                          <Play className="w-4 h-4 mr-2" />
+                        )}
+                        Quay số thủ công
+                      </Button>
+                    )}
+
+                    {/* Process Payout Button - Show when session is completed */}
+                    {currentSession && currentSession.status === "completed" && currentSession.winning_numbers && (
+                      <Button
+                        onClick={handleProcessPayout}
+                        disabled={isProcessingPayout}
+                        variant="outline"
+                        className="w-full bg-purple-500 text-white hover:bg-purple-600 border-purple-500"
+                      >
+                        {isProcessingPayout ? (
+                          <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        ) : (
+                          <Award className="w-4 h-4 mr-2" />
+                        )}
+                        Xử lý trả thưởng
+                      </Button>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
 

@@ -1,104 +1,140 @@
-import { NextResponse } from "next/server"
-import { supabase } from "@/lib/supabase"
+import { NextResponse, type NextRequest } from "next/server"
+import { createClient } from "@supabase/supabase-js"
 import { AuthService } from "@/lib/auth"
 
-async function getCurrentUser(request: Request) {
-  const authHeader = request.headers.get("Authorization")
-  if (authHeader && authHeader.startsWith("Bearer ")) {
+const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+
+export async function GET(request: NextRequest) {
+  try {
+    // Authentication check
+    const authHeader = request.headers.get("Authorization")
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Unauthorized: Missing token" }, { status: 401 })
+    }
+
     const token = authHeader.substring(7)
     const user = AuthService.verifySessionToken(token)
-    return user
-  }
-  return null
-}
-
-export async function GET(request: Request) {
-  try {
-    const user = await getCurrentUser(request)
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return NextResponse.json({ error: "Unauthorized: Invalid token" }, { status: 401 })
     }
 
     const { searchParams } = new URL(request.url)
-    const transactionId = searchParams.get("transaction_id")
-    const gameBetId = searchParams.get("game_bet_id")
+    const betId = searchParams.get("betId")
 
-    console.log(`[BETTING_DETAILS_GET] User: ${user.username}, Transaction: ${transactionId}, Bet: ${gameBetId}`)
-
-    if (!transactionId && !gameBetId) {
-      return NextResponse.json({ error: "Missing transaction_id or game_bet_id" }, { status: 400 })
+    if (!betId) {
+      return NextResponse.json({ error: "betId is required" }, { status: 400 })
     }
 
-    let bettingDetails = null
+    console.log(`[BETTING_DETAILS] Fetching details for bet: ${betId}`)
 
-    if (gameBetId) {
-      // Get betting details from user_bets table
-      const { data: betData, error: betError } = await supabase
-        .from("user_bets")
-        .select(`
-          *,
-          game_sessions(
-            id,
-            session_number,
-            start_time,
-            end_time,
-            winning_numbers,
-            status
-          )
-        `)
-        .eq("id", gameBetId)
-        .eq("user_id", user.id)
-        .single()
+    // Get bet details with session and transaction info
+    const { data: betDetails, error: betError } = await supabaseAdmin
+      .from("user_bets")
+      .select(`
+        *,
+        game_sessions!inner(
+          id,
+          session_number,
+          game_type,
+          winning_numbers,
+          results_data,
+          status
+        ),
+        transactions!left(
+          id,
+          type,
+          amount,
+          description,
+          created_at
+        )
+      `)
+      .eq("id", betId)
+      .eq("user_id", user.id)
+      .single()
 
-      if (betError) {
-        console.error("[BETTING_DETAILS_GET] Bet details error:", betError)
-        return NextResponse.json({ error: "Failed to fetch bet details" }, { status: 500 })
+    if (betError || !betDetails) {
+      console.error("[BETTING_DETAILS] Error fetching bet details:", betError)
+      return NextResponse.json({ error: "Bet not found" }, { status: 404 })
+    }
+
+    // Calculate actual winning numbers (intersection of bet numbers and session winning numbers)
+    const betNumbers = betDetails.numbers.map((n: number) => n.toString().padStart(2, "0"))
+    const sessionWinningNumbers = betDetails.game_sessions.winning_numbers || []
+
+    // Find which numbers actually won
+    const actualWinningNumbers: { [key: string]: number } = {}
+
+    if (betDetails.status === "won" && sessionWinningNumbers.length > 0) {
+      // For Lô betting: count occurrences of each bet number in winning numbers
+      if (betDetails.bet_type.includes("lo")) {
+        betNumbers.forEach((betNumber) => {
+          const hitCount = sessionWinningNumbers.filter((winNum: string) => winNum === betNumber).length
+          if (hitCount > 0) {
+            actualWinningNumbers[betNumber] = hitCount
+          }
+        })
       }
-
-      if (betData) {
-        // Calculate hit counts for winning numbers
-        const hitCount: { [key: string]: number } = {}
-        const actualWinningNumbers: string[] = []
-
-        if (betData.numbers && betData.game_sessions?.winning_numbers) {
-          betData.numbers.forEach((betNumber: number) => {
-            const betNumberStr = betNumber.toString().padStart(2, "0")
-            const hits = betData.game_sessions.winning_numbers.filter(
-              (winNum: string) => winNum === betNumberStr,
-            ).length
-            if (hits > 0) {
-              hitCount[betNumberStr] = hits
-              actualWinningNumbers.push(betNumberStr)
+      // For Đề betting: check if bet number matches special prize last 2 digits
+      else if (betDetails.bet_type.includes("de")) {
+        const specialPrize = betDetails.game_sessions.results_data?.special_prize
+        if (specialPrize) {
+          const specialLast2 = specialPrize.toString().slice(-2)
+          betNumbers.forEach((betNumber) => {
+            if (betNumber === specialLast2) {
+              actualWinningNumbers[betNumber] = 1
             }
           })
         }
-
-        bettingDetails = {
-          id: betData.id,
-          session_number: betData.game_sessions?.session_number || "N/A",
-          bet_type: betData.bet_type,
-          numbers: betData.numbers?.map((n: number) => n.toString().padStart(2, "0")) || [],
-          bet_amount: betData.amount || 0,
-          points: betData.points || 0,
-          potential_win: betData.potential_win || 0,
-          actual_win: betData.win_amount || 0,
-          status: betData.status,
-          created_at: betData.created_at,
-          processed_at: betData.processed_at,
-          winning_numbers: betData.game_sessions?.winning_numbers || [],
-          actual_winning_numbers: actualWinningNumbers, // Only numbers that actually won
-          hit_count: hitCount,
-          session_info: betData.game_sessions,
-        }
+      }
+      // For other bet types, check direct matches
+      else {
+        betNumbers.forEach((betNumber) => {
+          if (sessionWinningNumbers.includes(betNumber)) {
+            actualWinningNumbers[betNumber] = 1
+          }
+        })
       }
     }
 
-    return NextResponse.json({
+    // Create formatted winning description
+    let winningDescription = ""
+    if (Object.keys(actualWinningNumbers).length > 0) {
+      const winningParts = Object.entries(actualWinningNumbers).map(([number, count]) => `${number}[${count}]`)
+      const totalHits = Object.values(actualWinningNumbers).reduce((sum, count) => sum + count, 0)
+
+      winningDescription = `Số trúng [${winningParts.join(", ")}] | ${betDetails.points}.00 điểm/số | Tổng ${totalHits} lần trúng | Phiên ${betDetails.game_sessions.session_number} | Thưởng: ${betDetails.win_amount || 0}.00đ`
+    }
+
+    const response = {
       success: true,
-      betting_details: bettingDetails,
-    })
-  } catch (error) {
-    console.error("[BETTING_DETAILS_GET] Unexpected error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+      bet: {
+        id: betDetails.id,
+        bet_type: betDetails.bet_type,
+        numbers: betNumbers,
+        points: betDetails.points,
+        amount: betDetails.amount,
+        status: betDetails.status,
+        win_amount: betDetails.win_amount || 0,
+        created_at: betDetails.created_at,
+        processed_at: betDetails.processed_at,
+        actual_winning_numbers: actualWinningNumbers,
+        winning_description: winningDescription,
+      },
+      session: {
+        id: betDetails.game_sessions.id,
+        session_number: betDetails.game_sessions.session_number,
+        game_type: betDetails.game_sessions.game_type,
+        winning_numbers: betDetails.game_sessions.winning_numbers,
+        results_data: betDetails.game_sessions.results_data,
+        status: betDetails.game_sessions.status,
+      },
+      transactions: betDetails.transactions || [],
+    }
+
+    console.log(`[BETTING_DETAILS] Successfully fetched details for bet ${betId}`)
+    return NextResponse.json(response)
+  } catch (error: any) {
+    console.error("[BETTING_DETAILS] CRITICAL ERROR:", error)
+    return NextResponse.json({ error: "Internal Server Error", details: error.message }, { status: 500 })
   }
 }

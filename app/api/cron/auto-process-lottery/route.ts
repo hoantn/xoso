@@ -44,108 +44,20 @@ function generateLotteryResults() {
   }
 }
 
-// Helper function to process bet results and pay winners
-async function processBetsForSession(sessionId: string, winningNumbers: string[], gameType: string) {
-  try {
-    console.log(`[BETS_PROCESS] Processing bets for session ${sessionId} (${gameType})`)
-
-    // Get all pending bets for this session
-    const { data: bets, error: betsError } = await supabase
-      .from("user_bets")
-      .select("*")
-      .eq("session_id", sessionId)
-      .eq("status", "pending")
-
-    if (betsError) {
-      console.error("[BETS_PROCESS] Error fetching bets:", betsError)
-      return {
-        success: false,
-        processed: 0,
-        winners: 0,
-        totalWinAmount: 0,
-        error: betsError.message,
+// Get all 2-digit endings from all prizes
+function getAllTwoDigitEndings(results: any): string[] {
+  const endings: string[] = []
+  for (const key in results) {
+    if (Object.prototype.hasOwnProperty.call(results, key)) {
+      const prize = results[key]
+      if (typeof prize === "string") {
+        endings.push(prize.slice(-2))
+      } else if (Array.isArray(prize)) {
+        prize.forEach((num) => endings.push(num.slice(-2)))
       }
-    }
-
-    if (!bets || bets.length === 0) {
-      console.log(`[BETS_PROCESS] No pending bets found for session ${sessionId}`)
-      return {
-        success: true,
-        processed: 0,
-        winners: 0,
-        totalWinAmount: 0,
-        message: "No pending bets to process",
-      }
-    }
-
-    console.log(`[BETS_PROCESS] Found ${bets.length} pending bets for session ${sessionId}`)
-
-    let processedCount = 0
-    let totalWinners = 0
-    let totalWinAmount = 0
-    const errors: string[] = []
-
-    for (const bet of bets) {
-      try {
-        console.log(`[BETS_PROCESS] Processing bet ${bet.id} for user ${bet.user_id}`)
-
-        // Call the RPC function to process the bet and payout
-        const { data: rpcResult, error: rpcError } = await supabase.rpc("payout_winner_with_points", {
-          p_bet_id: bet.id,
-          p_session_id: sessionId,
-          p_winning_numbers: winningNumbers,
-        })
-
-        if (rpcError) {
-          console.error(`[BETS_PROCESS] ERROR: Failed to process bet ${bet.id}: Payout RPC failed:`, rpcError)
-          errors.push(`Payout failed for bet ${bet.id}: ${rpcError.message}`)
-          continue
-        }
-
-        // RPC function should return { is_winner, win_amount, new_balance }
-        if (rpcResult && rpcResult.is_winner) {
-          totalWinners++
-          totalWinAmount += rpcResult.win_amount || 0
-          console.log(`[BETS_PROCESS] ✅ Bet ${bet.id} won: ${rpcResult.win_amount}`)
-        } else {
-          console.log(`[BETS_PROCESS] ❌ Bet ${bet.id} lost`)
-        }
-        processedCount++
-      } catch (error) {
-        console.error(`[BETS_PROCESS] Error processing bet ${bet.id}:`, error)
-        errors.push(`Bet ${bet.id}: ${error instanceof Error ? error.message : String(error)}`)
-      }
-    }
-
-    console.log(
-      `[BETS_PROCESS] Completed processing for session ${sessionId}: ${processedCount}/${bets.length} bets, ${totalWinners} winners, total winnings: ${totalWinAmount}`,
-    )
-
-    if (errors.length > 0) {
-      console.error(`[BETS_PROCESS] Errors encountered:`, errors)
-    }
-
-    return {
-      success: errors.length === 0,
-      message:
-        errors.length > 0
-          ? `Processed with ${errors.length} errors`
-          : `Successfully processed ${processedCount} bets. ${totalWinners} winners, total winnings: ${totalWinAmount}`,
-      processed: processedCount,
-      winners: totalWinners,
-      totalWinAmount: totalWinAmount,
-      errors: errors.length > 0 ? errors : null,
-    }
-  } catch (error) {
-    console.error("[BETS_PROCESS] General error:", error)
-    return {
-      success: false,
-      processed: 0,
-      winners: 0,
-      totalWinAmount: 0,
-      error: error instanceof Error ? error.message : String(error),
     }
   }
+  return endings
 }
 
 export async function GET(request: Request) {
@@ -162,12 +74,12 @@ export async function GET(request: Request) {
 
     console.log(`[AUTO_PROCESS] Starting auto-process at ${now.toISOString()}`)
 
-    // Get all sessions that are not yet completed, ordered by end time
+    // Get all active fast lottery sessions
     const { data: activeSessions, error: sessionsError } = await supabase
       .from("game_sessions")
       .select("*")
       .in("game_type", ["lode_nhanh_1p", "lode_nhanh_5p", "lode_nhanh_30p"])
-      .neq("status", "completed")
+      .eq("status", "open")
       .order("end_time", { ascending: true })
 
     if (sessionsError) {
@@ -194,19 +106,18 @@ export async function GET(request: Request) {
         session.game_type === "lode_nhanh_1p" ? "1p" : session.game_type === "lode_nhanh_5p" ? "5p" : "30p"
 
       console.log(
-        `[AUTO_PROCESS] Processing session ${session.session_number} (${session.game_type}): ${session.status}, ${secondsRemaining}s remaining`,
+        `[AUTO_PROCESS] Processing session ${session.session_number} (${session.game_type}): ${secondsRemaining}s remaining`,
       )
 
       try {
-        // State 1: Open -> Close betting (15 seconds before end for 1p, 30 seconds for others)
-        const closeBettingThreshold = session.game_type === "lode_nhanh_1p" ? 15 : 30
-        if (session.status === "open" && secondsRemaining <= closeBettingThreshold && secondsRemaining > 10) {
-          console.log(`[AUTO_PROCESS] Closing betting for session ${session.session_number} (${session.game_type})`)
+        // Process based on countdown timing
+        if (secondsRemaining <= 5 && secondsRemaining > 3) {
+          // Close betting phase (5s to 3s remaining)
+          console.log(`[AUTO_PROCESS] Closing betting for session ${session.session_number}`)
 
           const { error: updateError } = await supabase
             .from("game_sessions")
             .update({
-              status: "drawing",
               results_data: {
                 ...session.results_data,
                 status: "betting_closed",
@@ -224,157 +135,79 @@ export async function GET(request: Request) {
               `❌ Session ${session.session_number} (${gameTypeName}): Failed to close betting: ${updateError.message}`,
             )
           }
-        }
-        // State 2: Drawing -> Generate results and process bets (10 seconds before end)
-        else if (session.status === "drawing" && secondsRemaining <= 10 && secondsRemaining > 0) {
-          console.log(
-            `[AUTO_PROCESS] Generating results and processing bets for session ${session.session_number} (${session.game_type})`,
-          )
-
-          // Generate results if not already generated
-          let winningNumbers = session.winning_numbers || []
-
-          if (winningNumbers.length === 0) {
-            const lotteryResults = generateLotteryResults()
-            winningNumbers = [lotteryResults.special_prize.slice(-2)]
-
-            console.log(
-              `[AUTO_PROCESS] Generated winning numbers for session ${session.session_number}: ${winningNumbers.join(", ")}`,
-            )
-
-            const { error: updateError } = await supabase
-              .from("game_sessions")
-              .update({
-                winning_numbers: winningNumbers,
-                results_data: {
-                  ...session.results_data,
-                  status: "drawing",
-                  description: "Đang quay số",
-                  drawing_started_at: now.toISOString(),
-                  ...lotteryResults,
-                },
-              })
-              .eq("id", session.id)
-
-            if (!updateError) {
-              results.push(
-                `🎲 Session ${session.session_number} (${gameTypeName}): Generated results - Winning numbers: ${winningNumbers.join(", ")}`,
-              )
-            } else {
-              console.error(
-                `[AUTO_PROCESS] Failed to generate results for session ${session.session_number}:`,
-                updateError,
-              )
-              results.push(
-                `❌ Session ${session.session_number} (${gameTypeName}): Failed to generate results: ${updateError.message}`,
-              )
-              continue
-            }
-          }
-
-          // Process bets immediately after generating results
-          console.log(`[AUTO_PROCESS] Processing bets for session ${session.session_number}`)
-          const betResults = await processBetsForSession(session.id, winningNumbers, session.game_type)
-
-          const { error: updateError2 } = await supabase
-            .from("game_sessions")
-            .update({
-              status: "processing_rewards",
-              results_data: {
-                ...session.results_data,
-                status: "processing_rewards",
-                description: "Đang xử lý thưởng",
-                bet_processing_started_at: now.toISOString(),
-                bet_processing: betResults,
-              },
-            })
-            .eq("id", session.id)
-
-          if (!updateError2) {
-            results.push(
-              `💰 Session ${session.session_number} (${gameTypeName}): Processed ${betResults.processed} bets, ${betResults.winners} winners, winnings: ${betResults.totalWinAmount}`,
-            )
-          } else {
-            console.error(
-              `[AUTO_PROCESS] Failed to update after bet processing for session ${session.session_number}:`,
-              updateError2,
-            )
-            results.push(
-              `❌ Session ${session.session_number} (${gameTypeName}): Failed to update after bet processing: ${updateError2.message}`,
-            )
-          }
-        }
-        // State 3: Processing rewards -> Completed (at or after end time)
-        else if (session.status === "processing_rewards" && secondsRemaining <= 0) {
-          console.log(`[AUTO_PROCESS] Completing session ${session.session_number} (${session.game_type})`)
+        } else if (secondsRemaining <= 3 && secondsRemaining > 0) {
+          // Drawing phase (3s to 0s remaining)
+          console.log(`[AUTO_PROCESS] Drawing phase for session ${session.session_number}`)
 
           const { error: updateError } = await supabase
             .from("game_sessions")
             .update({
-              status: "completed",
               results_data: {
                 ...session.results_data,
-                status: "completed",
-                description: "Hoàn thành",
-                completed_at: now.toISOString(),
+                status: "drawing",
+                description: "Đang quay số",
+                drawing_started_at: now.toISOString(),
               },
             })
             .eq("id", session.id)
 
           if (!updateError) {
-            results.push(`✅ Session ${session.session_number} (${gameTypeName}): Completed`)
-          } else {
-            console.error(`[AUTO_PROCESS] Failed to complete session ${session.session_number}:`, updateError)
-            results.push(
-              `❌ Session ${session.session_number} (${gameTypeName}): Failed to complete: ${updateError.message}`,
-            )
-          }
-        }
-        // Handle sessions that are overdue but still in open status
-        else if (session.status === "open" && secondsRemaining <= 0) {
-          console.log(
-            `[AUTO_PROCESS] Emergency processing for overdue session ${session.session_number} (${session.game_type})`,
-          )
-
-          // Force close and process immediately
-          const lotteryResults = generateLotteryResults()
-          const winningNumbers = [lotteryResults.special_prize.slice(-2)]
-
-          const { error: updateError } = await supabase
-            .from("game_sessions")
-            .update({
-              status: "processing_rewards",
-              winning_numbers: winningNumbers,
-              results_data: {
-                ...session.results_data,
-                status: "processing_rewards",
-                description: "Xử lý khẩn cấp - Phiên quá hạn",
-                emergency_processed_at: now.toISOString(),
-                ...lotteryResults,
-              },
-            })
-            .eq("id", session.id)
-
-          if (!updateError) {
-            // Process bets immediately
-            const betResults = await processBetsForSession(session.id, winningNumbers, session.game_type)
-            results.push(
-              `⚡ Session ${session.session_number} (${gameTypeName}): Emergency processed - ${betResults.processed} bets, ${betResults.winners} winners`,
-            )
+            results.push(`🎲 Session ${session.session_number} (${gameTypeName}): Drawing phase`)
           } else {
             console.error(
-              `[AUTO_PROCESS] Failed emergency processing for session ${session.session_number}:`,
+              `[AUTO_PROCESS] Failed to update drawing phase for session ${session.session_number}:`,
               updateError,
             )
             results.push(
-              `❌ Session ${session.session_number} (${gameTypeName}): Failed emergency processing: ${updateError.message}`,
+              `❌ Session ${session.session_number} (${gameTypeName}): Failed to update drawing phase: ${updateError.message}`,
+            )
+          }
+        } else if (secondsRemaining <= 0) {
+          // Process draw, payout, and create next session (time expired)
+          console.log(`[AUTO_PROCESS] Processing draw and payout for session ${session.session_number}`)
+
+          // Generate results
+          const lotteryResults = generateLotteryResults()
+          const winningNumbers = getAllTwoDigitEndings(lotteryResults)
+
+          // Process lottery draw (includes payout)
+          const { data: processResult, error: processError } = await supabase.rpc("process_lottery_draw", {
+            p_session_id: session.id,
+            p_winning_numbers: winningNumbers,
+            p_results_data: lotteryResults,
+          })
+
+          if (!processError) {
+            results.push(
+              `✅ Session ${session.session_number} (${gameTypeName}): Completed - ${processResult?.winners || 0} winners, ${processResult?.total_payout || 0} payout`,
+            )
+
+            // Auto-create next session
+            try {
+              const { data: nextSession, error: createError } = await supabase.rpc("create_next_game_session", {
+                p_game_type: session.game_type,
+              })
+
+              if (!createError && nextSession) {
+                results.push(`🆕 Created next session #${nextSession.session_number} for ${gameTypeName}`)
+              } else {
+                console.error(`[AUTO_PROCESS] Failed to create next session for ${session.game_type}:`, createError)
+                results.push(`⚠️ Session ${session.session_number} completed but failed to create next session`)
+              }
+            } catch (createErr) {
+              console.error(`[AUTO_PROCESS] Error creating next session:`, createErr)
+              results.push(`⚠️ Session ${session.session_number} completed but failed to create next session`)
+            }
+          } else {
+            console.error(`[AUTO_PROCESS] Failed to process draw for session ${session.session_number}:`, processError)
+            results.push(
+              `❌ Session ${session.session_number} (${gameTypeName}): Failed to process draw: ${processError.message}`,
             )
           }
         } else {
-          // Session is in normal state, no action needed
-          const statusEmoji = session.status === "open" ? "🟢" : session.status === "drawing" ? "🎲" : "⏳"
+          // Session is still in normal betting phase
           results.push(
-            `${statusEmoji} Session ${session.session_number} (${gameTypeName}): ${session.status} (${secondsRemaining}s remaining)`,
+            `🟢 Session ${session.session_number} (${gameTypeName}): Accepting bets (${secondsRemaining}s remaining)`,
           )
         }
       } catch (error) {

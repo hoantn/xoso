@@ -178,7 +178,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success: true,
-      data: enhancedTransactions,
+      data: enhancedTransactions, // This is the field that the frontend needs to read
       pagination: {
         page,
         limit,

@@ -1,136 +1,569 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { useToast } from "@/hooks/use-toast"
+import { Loader2, Play, RefreshCw, Clock, CheckCircle, Plus, Timer, Award } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
 
-const LotteryDrawManager = () => {
-  const [activeSessions, setActiveSessions] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+interface ReadySession {
+  id: string
+  game_type: string
+  session_number: number
+  end_time: string
+  status: string
+  countdown_seconds?: number
+}
+
+interface ActiveSession {
+  id: string
+  game_type: string
+  session_number: number
+  start_time: string
+  end_time: string
+  status: string
+  countdown_seconds: number
+}
+
+interface DrawResult {
+  success: boolean
+  session: {
+    id: string
+    session_number: number
+    game_type: string
+    status: string
+    end_time: string
+    winning_numbers: string[]
+    results_data: {
+      special_prize: string
+      first_prize: string
+      second_prize: string[]
+      third_prize: string[]
+      fourth_prize: string[]
+      fifth_prize: string[]
+      sixth_prize: string[]
+      seventh_prize: string[]
+    }
+  }
+  processing_result: {
+    success: boolean
+    processed_bets: number
+    winners: number
+    total_payout: number
+  }
+  message: string
+}
+
+interface LotteryDrawManagerProps {
+  token: string
+}
+
+const GAME_TYPES = [
+  { id: "lode_nhanh_1p", name: "Lô Đề Nhanh 1 Phút", duration: 1, color: "bg-red-100 text-red-800" },
+  { id: "lode_nhanh_5p", name: "Lô Đề Nhanh 5 Phút", duration: 5, color: "bg-blue-100 text-blue-800" },
+  { id: "lode_nhanh_30p", name: "Lô Đề Nhanh 30 Phút", duration: 30, color: "bg-green-100 text-green-800" },
+]
+
+export function LotteryDrawManager({ token }: LotteryDrawManagerProps) {
+  const [readySessions, setReadySessions] = useState<ReadySession[]>([])
+  const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([])
+  const [selectedGameTypes, setSelectedGameTypes] = useState<string[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
+  const [isDrawing, setIsDrawing] = useState<string | null>(null)
+  const [lastDrawResult, setLastDrawResult] = useState<DrawResult | null>(null)
+  const { toast } = useToast()
+
+  const fetchActiveSessions = async () => {
+    setIsLoading(true)
+    try {
+      const response = await fetch("/api/admin/lottery/active-sessions", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+      if (!response.ok) throw new Error("Failed to fetch active sessions")
+
+      const data = await response.json()
+      setActiveSessions(data.sessions || [])
+    } catch (error) {
+      console.error("Error fetching active sessions:", error)
+      toast({
+        title: "Lỗi",
+        description: "Không thể tải danh sách phiên đang hoạt động",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const fetchReadySessions = async () => {
+    try {
+      const response = await fetch("/api/game/draw-lottery", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        if (errorText.trim().startsWith("<!DOCTYPE html>")) {
+          throw new Error(
+            `Server returned an HTML error page (Status: ${response.status}). The API route might be missing or broken.`,
+          )
+        }
+        throw new Error(`Failed to fetch ready sessions: ${errorText}`)
+      }
+
+      const data = await response.json()
+      if (!data.success) {
+        throw new Error(data.error || "API returned an error")
+      }
+
+      setReadySessions(data.ready_sessions || [])
+    } catch (error) {
+      console.error("Error fetching ready sessions:", error)
+      toast({
+        title: "Lỗi Tải Phiên Sẵn Sàng",
+        description: error instanceof Error ? error.message : "Lỗi không xác định",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const createNewSessions = async () => {
+    if (selectedGameTypes.length === 0) {
+      toast({
+        title: "Lỗi",
+        description: "Vui lòng chọn ít nhất một loại lô đề để tạo phiên",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsCreating(true)
+    try {
+      const results: string[] = []
+      let hasSuccess = false
+
+      for (const gameType of selectedGameTypes) {
+        try {
+          console.log(`Creating session for ${gameType}`)
+
+          const res = await fetch("/api/admin/lottery/create-session", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ gameType }),
+          })
+
+          const responseText = await res.text()
+          console.log(`Response for ${gameType}:`, responseText)
+
+          let data
+          try {
+            data = JSON.parse(responseText)
+          } catch {
+            data = { error: responseText }
+          }
+
+          if (res.ok && data.success) {
+            results.push(`✅ ${formatGameType(gameType)}: Phiên #${data.session?.session_number}`)
+            hasSuccess = true
+          } else {
+            results.push(`❌ ${formatGameType(gameType)}: ${data.error || "Lỗi không xác định"}`)
+          }
+        } catch (err) {
+          console.error(`Error creating session for ${gameType}:`, err)
+          results.push(`❌ ${formatGameType(gameType)}: Lỗi kết nối`)
+        }
+      }
+
+      toast({
+        title: hasSuccess ? "Tạo phiên hoàn tất!" : "Có lỗi xảy ra",
+        description: results.join("\n"),
+        variant: hasSuccess ? "default" : "destructive",
+      })
+
+      if (hasSuccess) {
+        setSelectedGameTypes([])
+        fetchActiveSessions()
+      }
+    } catch (error) {
+      console.error("Error creating sessions:", error)
+      toast({
+        title: "Lỗi tạo phiên",
+        description: "Không thể tạo phiên mới",
+        variant: "destructive",
+      })
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  const handleGameTypeSelection = (gameType: string, checked: boolean) => {
+    if (checked) {
+      setSelectedGameTypes([...selectedGameTypes, gameType])
+    } else {
+      setSelectedGameTypes(selectedGameTypes.filter((type) => type !== gameType))
+    }
+  }
+
+  const formatGameType = (gameType: string) => {
+    const gameConfig = GAME_TYPES.find((g) => g.id === gameType)
+    return gameConfig?.name || gameType
+  }
+
+  const getGameTypeColor = (gameType: string) => {
+    const gameConfig = GAME_TYPES.find((g) => g.id === gameType)
+    return gameConfig?.color || "bg-gray-100 text-gray-800"
+  }
+
+  const formatCountdown = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60)
+    const remainingSeconds = seconds % 60
+    return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`
+  }
+
+  const getSessionStatus = (session: ActiveSession) => {
+    if (session.countdown_seconds <= 10 && session.countdown_seconds > 8) {
+      return { text: "Đóng cược", color: "bg-yellow-100 text-yellow-800" }
+    } else if (session.countdown_seconds <= 8 && session.countdown_seconds > 3) {
+      return { text: "Đang quay", color: "bg-orange-100 text-orange-800" }
+    } else if (session.countdown_seconds <= 3 && session.countdown_seconds > 0) {
+      return { text: "Trả thưởng", color: "bg-purple-100 text-purple-800" }
+    } else if (session.countdown_seconds <= 0) {
+      return { text: "Hoàn thành", color: "bg-green-100 text-green-800" }
+    } else {
+      return { text: "Đang mở", color: "bg-blue-100 text-blue-800" }
+    }
+  }
+
+  const drawLottery = async (sessionId: string, gameType: string) => {
+    setIsDrawing(sessionId)
+    try {
+      console.log(`Manual draw for session ${sessionId}, gameType: ${gameType}`)
+
+      const response = await fetch("/api/game/draw-lottery", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          sessionId,
+          gameType,
+          forceManual: true,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to draw lottery")
+      }
+
+      const result = await response.json()
+      setLastDrawResult(result)
+
+      toast({
+        title: "Quay số thành công!",
+        description: `Phiên #${result.session.session_number}: ${result.processing_result?.winners || 0} người thắng, thưởng ${(result.processing_result?.total_payout || 0).toLocaleString("vi-VN")}đ`,
+      })
+
+      // Refresh both ready sessions and active sessions
+      fetchReadySessions()
+      fetchActiveSessions()
+    } catch (error) {
+      console.error("Error drawing lottery:", error)
+      toast({
+        title: "Lỗi quay số",
+        description: error instanceof Error ? error.message : "Lỗi không xác định",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDrawing(null)
+    }
+  }
 
   useEffect(() => {
     fetchActiveSessions()
+    fetchReadySessions()
+
+    const interval = setInterval(() => {
+      fetchActiveSessions()
+      fetchReadySessions()
+    }, 5000) // Refresh every 5 seconds
+
+    return () => clearInterval(interval)
   }, [])
 
-  // Add better error handling and session state management
-  const fetchActiveSessions = async () => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      const response = await fetch("/api/admin/lottery/active-sessions")
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || `HTTP ${response.status}`)
-      }
-
-      if (data.success) {
-        setActiveSessions(data.sessions || [])
-
-        // Check if there are sessions ready for processing
-        const readySessions = (data.sessions || []).filter((session: any) => {
-          const now = new Date()
-          const endTime = new Date(session.end_time)
-          const secondsRemaining = Math.floor((endTime.getTime() - now.getTime()) / 1000)
-
-          return (
-            (session.status === "open" && secondsRemaining <= 30) ||
-            (session.status === "drawing" && secondsRemaining <= 10) ||
-            (session.status === "processing_rewards" && secondsRemaining <= 0)
-          )
-        })
-
-        if (readySessions.length === 0 && data.sessions.length > 0) {
-          setError("Có phiên đang hoạt động nhưng chưa sẵn sàng xử lý")
-        }
-      } else {
-        setError(data.error || "Không thể tải danh sách phiên")
-      }
-    } catch (err) {
-      console.error("Error fetching active sessions:", err)
-      setError(err instanceof Error ? err.message : "Lỗi không xác định")
-      setActiveSessions([])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Update the session display to show more detailed status
-  const getSessionStatusDisplay = (session: any) => {
-    const now = new Date()
-    const endTime = new Date(session.end_time)
-    const secondsRemaining = Math.floor((endTime.getTime() - now.getTime()) / 1000)
-
-    let statusText = session.status
-    let statusColor = "gray"
-    let canProcess = false
-
-    switch (session.status) {
-      case "open":
-        if (secondsRemaining <= 30) {
-          statusText = "Sẵn sàng đóng cược"
-          statusColor = "yellow"
-          canProcess = true
-        } else {
-          statusText = `Đang mở cược (${secondsRemaining}s)`
-          statusColor = "green"
-        }
-        break
-      case "drawing":
-        if (secondsRemaining <= 10) {
-          statusText = "Sẵn sàng quay số"
-          statusColor = "orange"
-          canProcess = true
-        } else {
-          statusText = `Đang đóng cược (${secondsRemaining}s)`
-          statusColor = "yellow"
-        }
-        break
-      case "processing_rewards":
-        if (secondsRemaining <= 0) {
-          statusText = "Sẵn sàng hoàn thành"
-          statusColor = "blue"
-          canProcess = true
-        } else {
-          statusText = `Đang xử lý thưởng (${secondsRemaining}s)`
-          statusColor = "purple"
-        }
-        break
-      case "completed":
-        statusText = "Đã hoàn thành"
-        statusColor = "green"
-        break
-      default:
-        statusText = session.status
-    }
-
-    return { statusText, statusColor, canProcess, secondsRemaining }
-  }
-
   return (
-    <div>
-      <h1>Lottery Draw Manager</h1>
-      {loading && <p>Loading...</p>}
-      {error && <p style={{ color: "red" }}>Error: {error}</p>}
-      <h2>Active Sessions</h2>
-      {activeSessions.length > 0 ? (
-        <ul>
-          {activeSessions.map((session) => {
-            const { statusText, statusColor, canProcess } = getSessionStatusDisplay(session)
-            return (
-              <li key={session.id}>
-                Session ID: {session.id}, Status: <span style={{ color: statusColor }}>{statusText}</span>
-                {canProcess && <button>Process</button>}
-              </li>
-            )
-          })}
-        </ul>
-      ) : (
-        <p>No active sessions found.</p>
+    <div className="space-y-6">
+      {/* Create New Sessions */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Plus className="w-5 h-5" />
+            Tạo Phiên Quay Số Mới
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {GAME_TYPES.map((gameType) => (
+                <div key={gameType.id} className="flex items-center space-x-2 p-3 border rounded-lg">
+                  <Checkbox
+                    id={gameType.id}
+                    checked={selectedGameTypes.includes(gameType.id)}
+                    onCheckedChange={(checked) => handleGameTypeSelection(gameType.id, checked as boolean)}
+                  />
+                  <Label htmlFor={gameType.id} className="flex-1 cursor-pointer">
+                    <div className="font-medium">{gameType.name}</div>
+                    <div className="text-sm text-gray-500">Thời gian: {gameType.duration} phút</div>
+                  </Label>
+                </div>
+              ))}
+            </div>
+
+            <Button
+              onClick={createNewSessions}
+              disabled={isCreating || selectedGameTypes.length === 0}
+              className="w-full"
+            >
+              {isCreating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+              Tạo Phiên Quay Số ({selectedGameTypes.length} loại)
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Active Sessions */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Timer className="w-5 h-5" />
+              Phiên Đang Hoạt Động
+            </span>
+            <Button onClick={fetchActiveSessions} disabled={isLoading} variant="outline" size="sm">
+              <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
+              Làm mới
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin mr-2" />
+              <span>Đang tải...</span>
+            </div>
+          ) : activeSessions.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">Không có phiên nào đang hoạt động</div>
+          ) : (
+            <div className="space-y-4">
+              {activeSessions.map((session) => {
+                const status = getSessionStatus(session)
+                return (
+                  <div key={session.id} className="flex items-center justify-between p-4 border rounded-lg bg-gray-50">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <Badge variant="outline">#{session.session_number}</Badge>
+                        <Badge className={getGameTypeColor(session.game_type)}>
+                          {formatGameType(session.game_type)}
+                        </Badge>
+                        <Badge className={status.color}>{status.text}</Badge>
+                      </div>
+                      <div className="flex items-center gap-4 text-sm text-gray-600">
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          Còn lại: {formatCountdown(session.countdown_seconds)}
+                        </span>
+                        <span>Kết thúc: {new Date(session.end_time).toLocaleTimeString("vi-VN")}</span>
+                      </div>
+                    </div>
+
+                    {session.countdown_seconds <= 0 && (
+                      <Badge className="bg-green-100 text-green-800">
+                        <CheckCircle className="w-3 h-3 mr-1" />
+                        Hoàn thành
+                      </Badge>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Manual Draw Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Play className="w-5 h-5" />
+            Quay Số Thủ Công
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {readySessions.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">Không có phiên nào sẵn sàng quay số</div>
+          ) : (
+            <div className="space-y-4">
+              {readySessions.map((session) => (
+                <div key={session.id} className="flex items-center justify-between p-4 border rounded-lg bg-gray-50">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3">
+                      <Badge variant="outline">#{session.session_number}</Badge>
+                      <span className="font-medium">{formatGameType(session.game_type)}</span>
+                      <Badge variant="secondary">
+                        <Clock className="w-3 h-3 mr-1" />
+                        {new Date(session.end_time).toLocaleTimeString("vi-VN")}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Kết thúc: {new Date(session.end_time).toLocaleString("vi-VN")}
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => drawLottery(session.id, session.game_type)}
+                    disabled={isDrawing === session.id}
+                    size="sm"
+                  >
+                    {isDrawing === session.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    ) : (
+                      <Play className="w-4 h-4 mr-2" />
+                    )}
+                    Quay số
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Last Draw Result */}
+      {lastDrawResult && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Award className="w-5 h-5 text-green-600" />
+              Kết Quả Quay Số Gần Nhất
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Alert className="mb-4">
+              <CheckCircle className="h-4 w-4" />
+              <AlertDescription>{lastDrawResult.message}</AlertDescription>
+            </Alert>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <h4 className="font-semibold mb-2">Thông tin phiên:</h4>
+                <div className="bg-blue-50 p-4 rounded-lg space-y-2">
+                  <p>
+                    <span className="font-medium">Số phiên:</span> #{lastDrawResult.session?.session_number}
+                  </p>
+                  <p>
+                    <span className="font-medium">Loại game:</span> {formatGameType(lastDrawResult.session?.game_type)}
+                  </p>
+                  <p>
+                    <span className="font-medium">Trạng thái:</span>
+                    <Badge
+                      className="ml-2"
+                      variant={lastDrawResult.session?.status === "completed" ? "default" : "secondary"}
+                    >
+                      {lastDrawResult.session?.status}
+                    </Badge>
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h4 className="font-semibold mb-2">Xử lý cược:</h4>
+                <div className="bg-green-50 p-4 rounded-lg space-y-2">
+                  <p>
+                    <span className="font-medium">Số cược xử lý:</span>{" "}
+                    {lastDrawResult.processing_result?.processed_bets || 0}
+                  </p>
+                  <p>
+                    <span className="font-medium">Số người thắng:</span>{" "}
+                    {lastDrawResult.processing_result?.winners || 0}
+                  </p>
+                  <p>
+                    <span className="font-medium">Tổng tiền thưởng:</span>{" "}
+                    {(lastDrawResult.processing_result?.total_payout || 0).toLocaleString("vi-VN")}đ
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Winning Numbers Display */}
+            {lastDrawResult.session?.winning_numbers && lastDrawResult.session.winning_numbers.length > 0 && (
+              <div className="mt-6">
+                <h4 className="font-semibold mb-3">Số trúng giải:</h4>
+                <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                  <div className="flex flex-wrap gap-2">
+                    {lastDrawResult.session.winning_numbers.map((number: string, index: number) => (
+                      <Badge key={index} className="bg-yellow-100 text-yellow-800 px-3 py-2 text-lg font-mono">
+                        {number}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Detailed Results using results_data */}
+            {lastDrawResult.session?.results_data && (
+              <div className="mt-6">
+                <h4 className="font-semibold mb-3">Chi tiết kết quả quay:</h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div className="bg-red-50 p-3 rounded-lg text-center">
+                    <div className="text-xs text-red-600 mb-1">Đặc Biệt</div>
+                    <Badge className="bg-red-100 text-red-800 font-mono">
+                      {lastDrawResult.session.results_data.special_prize}
+                    </Badge>
+                  </div>
+                  <div className="bg-blue-50 p-3 rounded-lg text-center">
+                    <div className="text-xs text-blue-600 mb-1">Giải Nhất</div>
+                    <Badge className="bg-blue-100 text-blue-800 font-mono">
+                      {lastDrawResult.session.results_data.first_prize}
+                    </Badge>
+                  </div>
+                  <div className="bg-green-50 p-3 rounded-lg text-center">
+                    <div className="text-xs text-green-600 mb-1">Số Trúng</div>
+                    <Badge className="bg-green-100 text-green-800 font-mono">
+                      {lastDrawResult.session.results_data.special_prize?.slice(-2)}
+                    </Badge>
+                  </div>
+                  <div className="bg-purple-50 p-3 rounded-lg text-center">
+                    <div className="text-xs text-purple-600 mb-1">Tỷ lệ thắng</div>
+                    <Badge className="bg-purple-100 text-purple-800">
+                      {lastDrawResult.processing_result?.processed_bets > 0
+                        ? Math.round(
+                            (lastDrawResult.processing_result.winners /
+                              lastDrawResult.processing_result.processed_bets) *
+                              100,
+                          )
+                        : 0}
+                      %
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   )
 }
-
-export { LotteryDrawManager }
-export default LotteryDrawManager
